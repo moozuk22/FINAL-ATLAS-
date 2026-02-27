@@ -9,6 +9,8 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import Index from "./pages/Index";
 import CustomerMenu from "./pages/CustomerMenu";
 import ClientTables from "./pages/ClientTables";
+import TableOptions from "./pages/TableOptions";
+import KidsZoneDashboard from "./pages/KidsZoneDashboard";
 import NotFound from "./pages/NotFound";
 import { Loader2 } from "lucide-react";
 
@@ -42,7 +44,8 @@ const App = () => (
           <Routes>
               <Route path="/" element={<ClientTables />} />
             <Route path="/menu" element={<CustomerMenu />} />
-              <Route path="/t/:tableNumber" element={<CustomerMenu />} />
+              <Route path="/t/:tableNumber" element={<TableOptions />} />
+              <Route path="/table-options/:tableNumber" element={<TableOptions />} />
               <Route 
                 path="/admin" 
                 element={
@@ -56,6 +59,14 @@ const App = () => (
                 element={
                   <Suspense fallback={<PageLoader />}>
                     <MenuEditor />
+                  </Suspense>
+                } 
+              />
+              <Route 
+                path="/admin/kids-zone" 
+                element={
+                  <Suspense fallback={<PageLoader />}>
+                    <KidsZoneDashboard />
                   </Suspense>
                 } 
               />

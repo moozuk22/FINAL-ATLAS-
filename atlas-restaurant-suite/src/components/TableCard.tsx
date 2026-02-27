@@ -10,6 +10,7 @@ interface TableCardProps {
   session: TableSession;
   onCompleteRequest: (requestId: string) => void;
   onMarkAsPaid: () => void;
+  onFreeTable?: () => void;
   completingRequests?: Set<string>;
 }
 
@@ -17,6 +18,7 @@ const TableCard: React.FC<TableCardProps> = ({
   session,
   onCompleteRequest,
   onMarkAsPaid,
+  onFreeTable,
   completingRequests = new Set(),
 }) => {
   // Memoize calculations for performance
@@ -58,15 +60,27 @@ const TableCard: React.FC<TableCardProps> = ({
         
         <div className="flex items-center gap-2 flex-shrink-0">
           {hasPending && !session.isLocked && (
-          <Button
-            size="sm"
+            <Button
+              size="sm"
               className="btn-gold text-xs h-8 sm:h-9 px-2 sm:px-3 touch-manipulation"
               onClick={onMarkAsPaid}
               aria-label={`Mark ${session.tableId} as paid`}
-          >
+            >
               <CheckCircle2 className="h-3 w-3 sm:mr-1" />
               <span className="hidden sm:inline">Mark Paid</span>
               <span className="sm:hidden">Paid</span>
+            </Button>
+          )}
+          {!hasActivity && onFreeTable && (
+          <Button
+            size="sm"
+            variant="outline"
+              className="text-xs h-8 sm:h-9 px-2 sm:px-3 touch-manipulation"
+              onClick={onFreeTable}
+              aria-label={`Free ${session.tableId}`}
+          >
+              <span className="hidden sm:inline">Free</span>
+              <span className="sm:hidden">Free</span>
           </Button>
         )}
         </div>

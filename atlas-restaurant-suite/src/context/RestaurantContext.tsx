@@ -48,6 +48,9 @@ export interface TableRequest {
   status: 'pending' | 'confirmed' | 'completed';
   timestamp: number;
   paymentMethod?: 'cash' | 'card';
+  source?: 'nfc' | 'qr' | 'direct';
+  requestType?: 'waiter' | 'bill' | 'animator' | 'order';
+  assignedTo?: string;
 }
 
 export interface TableSession {
@@ -56,6 +59,28 @@ export interface TableSession {
   cart: CartItem[];
   requests: TableRequest[];
   isVip: boolean;
+}
+
+export interface CustomerRating {
+  id: string;
+  tableId: string;
+  rating: number;
+  feedback?: string;
+  googleReviewSent: boolean;
+  createdAt: string;
+}
+
+export interface DailyMenuAssignment {
+  id: string;
+  menuItemId: string;
+  date: string;
+  isVisible: boolean;
+}
+
+export interface RevenueReport {
+  total: number;
+  orderCount: number;
+  date: string;
 }
 
 interface RestaurantContextType {
@@ -67,10 +92,12 @@ interface RestaurantContextType {
   removeFromCart: (tableId: string, itemId: string) => Promise<void>;
   updateCartQuantity: (tableId: string, itemId: string, quantity: number) => Promise<void>;
   clearCart: (tableId: string) => Promise<void>;
-  submitOrder: (tableId: string) => Promise<void>;
-  callWaiter: (tableId: string) => Promise<void>;
-  requestBill: (tableId: string, paymentMethod: 'cash' | 'card') => Promise<void>;
+  submitOrder: (tableId: string, source?: 'nfc' | 'qr' | 'direct') => Promise<void>;
+  callWaiter: (tableId: string, source?: 'nfc' | 'qr' | 'direct') => Promise<void>;
+  callAnimator: (tableId: string, source?: 'nfc' | 'qr' | 'direct') => Promise<void>;
+  requestBill: (tableId: string, paymentMethod: 'cash' | 'card', source?: 'nfc' | 'qr' | 'direct') => Promise<void>;
   completeRequest: (tableId: string, requestId: string) => Promise<void>;
+  completeAnimatorRequest: (tableId: string, requestId: string, animatorName: string) => Promise<void>;
   markAsPaid: (tableId: string) => Promise<void>;
   resetTable: (tableId: string) => Promise<void>;
   getCartTotal: (tableId: string) => number;
@@ -79,6 +106,15 @@ interface RestaurantContextType {
   addMenuItem: (item: Omit<MenuItem, 'id'>) => Promise<void>;
   updateMenuItem: (id: string, item: Partial<MenuItem>) => Promise<void>;
   deleteMenuItem: (id: string) => Promise<void>;
+  // Daily menu
+  getDailyMenuItems: (date?: string) => Promise<MenuItem[]>;
+  setDailyMenuItems: (date: string, itemIds: string[]) => Promise<void>;
+  toggleDailyMenuItemVisibility: (itemId: string, date: string, isVisible: boolean) => Promise<void>;
+  // Ratings
+  submitRating: (tableId: string, rating: number, feedback?: string) => Promise<void>;
+  // Reports
+  getRevenueReport: (date: string) => Promise<RevenueReport>;
+  getPendingOrders: () => TableRequest[];
 }
 
 const RestaurantContext = createContext<RestaurantContextType | undefined>(undefined);
@@ -311,9 +347,12 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             action: r.action,
             details: r.details || '',
             total: parseFloat(r.total || '0'),
-            status: r.status as 'pending' | 'completed',
+            status: r.status as 'pending' | 'confirmed' | 'completed',
             timestamp: r.timestamp,
             paymentMethod: r.payment_method as 'cash' | 'card' | undefined,
+            source: r.source as 'nfc' | 'qr' | 'direct' | undefined,
+            requestType: r.request_type as 'waiter' | 'bill' | 'animator' | 'order' | undefined,
+            assignedTo: r.assigned_to || undefined,
           }));
 
         sessions[tableId] = {
@@ -669,7 +708,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
   }, [loadTableSessions]); // tables not needed - we use setTables which is stable
 
-  const submitOrder = useCallback(async (tableId: string) => {
+  const submitOrder = useCallback(async (tableId: string, source: 'nfc' | 'qr' | 'direct' = 'direct') => {
     try {
       // Get current cart
       const { data: cartItems, error: cartError } = await supabase
@@ -704,11 +743,13 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         .insert({
           id: requestId,
           table_id: tableId,
-        action: '🍽️ NEW ORDER',
-        details: orderDetails,
-        total: orderTotal,
-        status: 'pending',
-        timestamp: Date.now(),
+          action: '🍽️ NEW ORDER',
+          details: orderDetails,
+          total: orderTotal,
+          status: 'pending',
+          timestamp: Date.now(),
+          source: source,
+          request_type: 'order',
         });
       
       // Clear cart immediately after order submission
@@ -735,25 +776,27 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
   }, []); // No dependencies - we fetch from database and use setTables (stable)
 
-  const callWaiter = useCallback(async (tableId: string) => {
+  const callWaiter = useCallback(async (tableId: string, source: 'nfc' | 'qr' | 'direct' = 'direct') => {
     try {
       await supabase
         .from('table_requests')
         .insert({
-        id: `req_${Date.now()}`,
+          id: `req_${Date.now()}`,
           table_id: tableId,
-        action: '🔔 WAITER CALL',
-        details: 'Customer requested assistance',
-        total: 0,
-        status: 'pending',
-        timestamp: Date.now(),
+          action: '🔔 WAITER CALL',
+          details: 'Customer requested assistance',
+          total: 0,
+          status: 'pending',
+          timestamp: Date.now(),
+          source: source,
+          request_type: 'waiter',
         });
     } catch (error) {
       console.error('Error calling waiter:', error);
     }
   }, []);
 
-  const requestBill = useCallback(async (tableId: string, paymentMethod: 'cash' | 'card') => {
+  const requestBill = useCallback(async (tableId: string, paymentMethod: 'cash' | 'card', source: 'nfc' | 'qr' | 'direct' = 'direct') => {
     try {
       // Get total from all completed orders
       const { data: requests } = await supabase
@@ -768,14 +811,16 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       await supabase
         .from('table_requests')
         .insert({
-        id: `req_${Date.now()}`,
+          id: `req_${Date.now()}`,
           table_id: tableId,
-        action: '💳 BILL REQUEST',
-        details: `Payment: ${paymentMethod === 'cash' ? 'Cash' : 'Card'}`,
-        total: totalBill,
-        status: 'pending',
-        timestamp: Date.now(),
+          action: '💳 BILL REQUEST',
+          details: `Payment: ${paymentMethod === 'cash' ? 'Cash' : 'Card'}`,
+          total: totalBill,
+          status: 'pending',
+          timestamp: Date.now(),
           payment_method: paymentMethod,
+          source: source,
+          request_type: 'bill',
         });
 
       // Lock table
@@ -1289,6 +1334,182 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
   }, []);
 
+  // Call animator function
+  const callAnimator = useCallback(async (tableId: string, source: 'nfc' | 'qr' | 'direct' = 'direct') => {
+    try {
+      await supabase
+        .from('table_requests')
+        .insert({
+          id: `req_${Date.now()}`,
+          table_id: tableId,
+          action: '🎭 АНИМАТОР ЗА ДЕТСКИ КЪТ',
+          details: 'Заявка за аниматор',
+          total: 0,
+          status: 'pending',
+          timestamp: Date.now(),
+          source: source,
+          request_type: 'animator',
+        });
+    } catch (error) {
+      console.error('Error calling animator:', error);
+      throw error;
+    }
+  }, []);
+
+  // Complete animator request (only animator can do this)
+  const completeAnimatorRequest = useCallback(async (tableId: string, requestId: string, animatorName: string) => {
+    try {
+      const { error: updateError } = await supabase
+        .from('table_requests')
+        .update({ 
+          status: 'confirmed',
+          assigned_to: animatorName
+        })
+        .eq('id', requestId)
+        .eq('table_id', tableId)
+        .eq('request_type', 'animator');
+      
+      if (updateError) {
+        console.error('Error completing animator request:', updateError);
+        loadTableSessions();
+        throw updateError;
+      }
+    } catch (error) {
+      console.error('Error completing animator request:', error);
+      loadTableSessions();
+      throw error;
+    }
+  }, [loadTableSessions]);
+
+  // Daily menu functions
+  const getDailyMenuItems = useCallback(async (date?: string): Promise<MenuItem[]> => {
+    try {
+      const targetDate = date || new Date().toISOString().split('T')[0];
+      const { data, error } = await supabase
+        .from('daily_menu_assignments')
+        .select(`
+          *,
+          menu_items (*)
+        `)
+        .eq('date', targetDate)
+        .eq('is_visible', true);
+
+      if (error) throw error;
+      
+      if (!data) return [];
+      
+      return data
+        .filter(dma => dma.menu_items)
+        .map(dma => mapMenuItem(dma.menu_items as DatabaseMenuItem));
+    } catch (error) {
+      console.error('Error getting daily menu items:', error);
+      return [];
+    }
+  }, []);
+
+  const setDailyMenuItems = useCallback(async (date: string, itemIds: string[]) => {
+    try {
+      // Delete existing assignments for this date
+      await supabase
+        .from('daily_menu_assignments')
+        .delete()
+        .eq('date', date);
+
+      // Insert new assignments
+      const assignments = itemIds.map(itemId => ({
+        id: `dma_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        menu_item_id: itemId,
+        date: date,
+        is_visible: true,
+      }));
+
+      if (assignments.length > 0) {
+        const { error } = await supabase
+          .from('daily_menu_assignments')
+          .insert(assignments);
+
+        if (error) throw error;
+      }
+    } catch (error) {
+      console.error('Error setting daily menu items:', error);
+      throw error;
+    }
+  }, []);
+
+  const toggleDailyMenuItemVisibility = useCallback(async (itemId: string, date: string, isVisible: boolean) => {
+    try {
+      const { error } = await supabase
+        .from('daily_menu_assignments')
+        .update({ is_visible: isVisible })
+        .eq('menu_item_id', itemId)
+        .eq('date', date);
+
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error toggling daily menu item visibility:', error);
+      throw error;
+    }
+  }, []);
+
+  // Rating function
+  const submitRating = useCallback(async (tableId: string, rating: number, feedback?: string) => {
+    try {
+      const { error } = await supabase
+        .from('customer_ratings')
+        .insert({
+          id: `rating_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          table_id: tableId,
+          rating: rating,
+          feedback: feedback || null,
+          google_review_sent: false,
+        });
+
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error submitting rating:', error);
+      throw error;
+    }
+  }, []);
+
+  // Revenue report function
+  const getRevenueReport = useCallback(async (date: string): Promise<RevenueReport> => {
+    try {
+      const { data, error } = await supabase
+        .from('completed_orders')
+        .select('total, action')
+        .gte('created_at', `${date}T00:00:00`)
+        .lte('created_at', `${date}T23:59:59`)
+        .eq('action', '🍽️ NEW ORDER');
+
+      if (error) throw error;
+
+      const total = (data || []).reduce((sum, order) => sum + parseFloat(String(order.total || '0')), 0);
+      const orderCount = (data || []).length;
+
+      return {
+        total,
+        orderCount,
+        date,
+      };
+    } catch (error) {
+      console.error('Error getting revenue report:', error);
+      return { total: 0, orderCount: 0, date };
+    }
+  }, []);
+
+  // Get pending orders (orders not confirmed)
+  const getPendingOrders = useCallback((): TableRequest[] => {
+    const allRequests: TableRequest[] = [];
+    Object.values(tables).forEach(table => {
+      table.requests.forEach(req => {
+        if (req.requestType === 'order' && req.status === 'pending') {
+          allRequests.push(req);
+        }
+      });
+    });
+    return allRequests;
+  }, [tables]);
+
   // Memoize context value to prevent unnecessary re-renders
   const contextValue = useMemo(() => ({
       tables,
@@ -1301,8 +1522,10 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       clearCart,
       submitOrder,
       callWaiter,
+      callAnimator,
       requestBill,
       completeRequest,
+      completeAnimatorRequest,
     markAsPaid,
       resetTable,
       getCartTotal,
@@ -1310,6 +1533,12 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     addMenuItem,
     updateMenuItem,
     deleteMenuItem,
+    getDailyMenuItems,
+    setDailyMenuItems,
+    toggleDailyMenuItemVisibility,
+    submitRating,
+    getRevenueReport,
+    getPendingOrders,
   }), [
       tables,
     menuItems,
@@ -1321,8 +1550,10 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       clearCart,
       submitOrder,
       callWaiter,
+      callAnimator,
       requestBill,
       completeRequest,
+      completeAnimatorRequest,
     markAsPaid,
       resetTable,
       getCartTotal,
@@ -1330,6 +1561,12 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     addMenuItem,
     updateMenuItem,
     deleteMenuItem,
+    getDailyMenuItems,
+    setDailyMenuItems,
+    toggleDailyMenuItemVisibility,
+    submitRating,
+    getRevenueReport,
+    getPendingOrders,
   ]);
 
   return (

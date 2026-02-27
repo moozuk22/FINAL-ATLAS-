@@ -1,10 +1,13 @@
 import React, { useEffect, useRef, useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Utensils, Loader2 } from 'lucide-react';
+import { ArrowLeft, Utensils, Loader2, Calendar, TrendingUp, Clock, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useRestaurant } from '@/context/RestaurantContext';
 import TableCard from '@/components/TableCard';
 import { useToast } from '@/hooks/use-toast';
+import DailyMenuEditor from '@/components/DailyMenuEditor';
+import RevenueReport from '@/components/RevenueReport';
+import PendingOrders from '@/components/PendingOrders';
 
 // Audio for alert notification
 const playAlertSound = () => {
@@ -31,9 +34,12 @@ const playAlertSound = () => {
 const StaffDashboard: React.FC = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { tables, completeRequest, markAsPaid, loading } = useRestaurant();
+  const { tables, completeRequest, markAsPaid, resetTable, loading } = useRestaurant();
   const prevPendingCountRef = useRef<number>(0);
   const [completingRequests, setCompletingRequests] = useState<Set<string>>(new Set());
+  const [dailyMenuOpen, setDailyMenuOpen] = useState(false);
+  const [revenueReportOpen, setRevenueReportOpen] = useState(false);
+  const [pendingOrdersOpen, setPendingOrdersOpen] = useState(false);
   
   // Get all table IDs in order - memoized
   const tableIds = useMemo(() => 
@@ -66,7 +72,7 @@ const StaffDashboard: React.FC = () => {
 
   const handleCompleteRequest = useCallback(async (tableId: string, requestId: string) => {
     const requestKey = `${tableId}_${requestId}`;
-    
+
     // Prevent double-clicks
     if (completingRequests.has(requestKey)) {
       return;
@@ -119,6 +125,29 @@ const StaffDashboard: React.FC = () => {
     }
   }, [markAsPaid, toast]);
 
+  const handleFreeTable = useCallback(async (tableId: string) => {
+    const tableName = tableId.replace('_', ' ');
+    if (!confirm(`Освобождаване на ${tableName}?\n\nТова ще изчисти всички данни и ще направи таблицата свободна.`)) {
+      return;
+    }
+    
+    try {
+      await resetTable(tableId);
+      toast({
+        title: '✅ Таблицата е освободена',
+        description: `${tableName} е свободна и готова за нова сесия`,
+        duration: 3000,
+      });
+    } catch (error) {
+      console.error('Error freeing table:', error);
+      toast({
+        title: 'Грешка',
+        description: 'Неуспешно освобождаване на таблица. Моля опитайте отново.',
+        variant: 'destructive',
+      });
+    }
+  }, [resetTable, toast]);
+
 
   return (
     <div className="min-h-screen pb-20 sm:pb-24">
@@ -146,7 +175,51 @@ const StaffDashboard: React.FC = () => {
               </div>
             </div>
             
-            <div className="flex items-center gap-3 sm:gap-4 lg:gap-6 w-full sm:w-auto justify-between sm:justify-end">
+            <div className="flex items-center gap-2 sm:gap-3 lg:gap-4 w-full sm:w-auto justify-between sm:justify-end flex-wrap">
+              {/* Additional Buttons */}
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setDailyMenuOpen(true)}
+                  className="gap-1 text-xs h-8 sm:h-9 touch-manipulation"
+                  aria-label="Daily Menu"
+                >
+                  <Calendar className="h-3 w-3 sm:h-4 sm:w-4" />
+                  <span className="hidden lg:inline">Меню за деня</span>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setRevenueReportOpen(true)}
+                  className="gap-1 text-xs h-8 sm:h-9 touch-manipulation"
+                  aria-label="Revenue Report"
+                >
+                  <TrendingUp className="h-3 w-3 sm:h-4 sm:w-4" />
+                  <span className="hidden lg:inline">Оборот</span>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPendingOrdersOpen(true)}
+                  className="gap-1 text-xs h-8 sm:h-9 touch-manipulation"
+                  aria-label="Pending Orders"
+                >
+                  <Clock className="h-3 w-3 sm:h-4 sm:w-4" />
+                  <span className="hidden lg:inline">Чакащи</span>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigate('/admin/kids-zone')}
+                  className="gap-1 text-xs h-8 sm:h-9 touch-manipulation"
+                  aria-label="Kids Zone"
+                >
+                  <Sparkles className="h-3 w-3 sm:h-4 sm:w-4" />
+                  <span className="hidden lg:inline">Детски кът</span>
+                </Button>
+              </div>
+              
               {/* Menu Editor Button */}
               <Button
                 variant="outline"
@@ -209,6 +282,7 @@ const StaffDashboard: React.FC = () => {
                 session={session}
                 onCompleteRequest={(requestId) => handleCompleteRequest(tableId, requestId)}
                 onMarkAsPaid={() => handleMarkAsPaid(tableId)}
+                onFreeTable={() => handleFreeTable(tableId)}
                 completingRequests={completingRequests}
               />
             );
@@ -216,6 +290,11 @@ const StaffDashboard: React.FC = () => {
         </div>
         )}
       </main>
+
+      {/* Modals */}
+      <DailyMenuEditor open={dailyMenuOpen} onClose={() => setDailyMenuOpen(false)} />
+      <RevenueReport open={revenueReportOpen} onClose={() => setRevenueReportOpen(false)} />
+      <PendingOrders open={pendingOrdersOpen} onClose={() => setPendingOrdersOpen(false)} />
 
       {/* Legend */}
       <footer 

@@ -38,10 +38,25 @@ const RequestRow: React.FC<RequestRowProps> = ({ request, onComplete, isCompleti
         <div className="flex-1 min-w-0">
           <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 mb-2">
             <span className="font-semibold text-sm sm:text-base">{request.action}</span>
-            <span className="text-xs sm:text-sm text-muted-foreground flex items-center gap-1 flex-shrink-0">
-              <Clock className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs sm:text-sm text-muted-foreground flex items-center gap-1 flex-shrink-0">
+                <Clock className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
               {time}
             </span>
+              {request.source && (
+                <span className="text-xs px-2 py-0.5 bg-secondary rounded flex-shrink-0">
+                  {request.source.toUpperCase()}
+                </span>
+              )}
+              {request.requestType && (
+                <span className="text-xs px-2 py-0.5 bg-primary/20 text-primary rounded flex-shrink-0">
+                  {request.requestType === 'waiter' && '🔔 Сервитьор'}
+                  {request.requestType === 'bill' && '💳 Сметка'}
+                  {request.requestType === 'animator' && '🎭 Аниматор'}
+                  {request.requestType === 'order' && '🍽️ Поръчка'}
+                </span>
+              )}
+            </div>
           </div>
           {/* Order details - fully visible, no truncation, larger text */}
           <div className="text-sm sm:text-base text-foreground/90 mt-2 space-y-1 font-medium">

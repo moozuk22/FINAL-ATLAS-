@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useSearchParams, useNavigate, useParams } from 'react-router-dom';
-import { Send, Bell, CreditCard, Lock, ArrowLeft, Loader2 } from 'lucide-react';
+import { Send, Bell, CreditCard, Lock, ArrowLeft, Loader2, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { useRestaurant } from '@/context/RestaurantContext';
@@ -8,6 +8,7 @@ import MenuItemCard from '@/components/MenuItemCard';
 import CartSummary from '@/components/CartSummary';
 import CartDrawer from '@/components/CartDrawer';
 import PaymentModal from '@/components/PaymentModal';
+import RatingModal from '@/components/RatingModal';
 import { trackQRScan } from '@/utils/analytics';
 import { triggerHapticFeedback, isOnline } from '@/utils/optimization';
 
@@ -30,6 +31,13 @@ const CustomerMenu: React.FC = () => {
   };
   
   const tableId = getTableId();
+  
+  // Determine source (qr, nfc, or direct)
+  const source = useMemo(() => {
+    if (tableNumber) return 'qr'; // QR scan
+    // Could add NFC detection here
+    return 'direct';
+  }, [tableNumber]);
   
   // Track QR code scan analytics
   useEffect(() => {
@@ -61,6 +69,7 @@ const CustomerMenu: React.FC = () => {
     clearCart,
     submitOrder,
     callWaiter,
+    callAnimator,
     requestBill,
     getCartTotal,
     getCartItemCount,
@@ -68,10 +77,18 @@ const CustomerMenu: React.FC = () => {
   } = useRestaurant();
 
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+  const [ratingModalOpen, setRatingModalOpen] = useState(false);
   const [cartDrawerOpen, setCartDrawerOpen] = useState(false);
   const [loadingItems, setLoadingItems] = useState<Set<string>>(new Set());
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isOffline, setIsOffline] = useState(!isOnline());
+  
+  // Check if menu should be hidden (after 15:00)
+  const isMenuHidden = useMemo(() => {
+    const now = new Date();
+    const hour = now.getHours();
+    return hour >= 15;
+  }, []);
   
   const session = getTableSession(tableId);
   const cartTotal = getCartTotal(tableId);
@@ -271,11 +288,12 @@ const CustomerMenu: React.FC = () => {
     
     setIsSubmitting(true);
     try {
-      await submitOrder(tableId);
+      await submitOrder(tableId, source);
     toast({
       title: '✅ Поръчката е изпратена',
       description: 'Благодарим ви! Ще я приготвим скоро.',
     });
+      // Note: Cart is cleared but order history remains in requests
     } catch (error) {
       console.error('Error submitting order:', error);
       toast({
@@ -286,13 +304,13 @@ const CustomerMenu: React.FC = () => {
     } finally {
       setIsSubmitting(false);
     }
-  }, [session.isLocked, cartItemCount, isSubmitting, tableId, submitOrder, toast]);
+  }, [session.isLocked, cartItemCount, isSubmitting, tableId, source, submitOrder, toast]);
 
   const handleCallWaiter = async () => {
     if (session.isLocked) return;
     
     try {
-      await callWaiter(tableId);
+      await callWaiter(tableId, source);
     toast({
       title: '🔔 Сервитьорът е повикан',
       description: 'Моля, изчакайте.',
@@ -307,14 +325,37 @@ const CustomerMenu: React.FC = () => {
     }
   };
 
+  const handleCallAnimator = async () => {
+    if (session.isLocked) return;
+    
+    try {
+      await callAnimator(tableId, source);
+      toast({
+        title: '🎭 Заявка за аниматор',
+        description: 'Аниматорът ще дойде скоро',
+      });
+    } catch (error) {
+      console.error('Error calling animator:', error);
+      toast({
+        title: 'Грешка',
+        description: 'Неуспешна заявка за аниматор',
+        variant: 'destructive',
+      });
+    }
+  };
+
   const handlePaymentSelect = async (method: 'cash' | 'card') => {
     setPaymentModalOpen(false);
     try {
-      await requestBill(tableId, method);
+      await requestBill(tableId, method, source);
     toast({
       title: '💳 Заявка за сметка',
       description: `Плащане: ${method === 'cash' ? 'В брой' : 'С карта'}`,
     });
+      // Show rating modal after bill request
+      setTimeout(() => {
+        setRatingModalOpen(true);
+      }, 1000);
     } catch (error) {
       console.error('Error requesting bill:', error);
       toast({
@@ -396,8 +437,18 @@ const CustomerMenu: React.FC = () => {
 
       {/* Menu */}
       <main className="max-w-3xl mx-auto px-4 sm:px-6 py-4 sm:py-6 md:py-8">
-        <div className="space-y-8 sm:space-y-12 md:space-y-16 stagger-children">
-          {sortedCategories.map(([category, items]) => {
+        {isMenuHidden ? (
+          <div className="text-center py-12">
+            <p className="text-lg text-muted-foreground">
+              Менюто е недостъпно след 15:00
+            </p>
+            <p className="text-sm text-muted-foreground mt-2">
+              Моля, използвайте другите опции
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-8 sm:space-y-12 md:space-y-16 stagger-children">
+            {sortedCategories.map(([category, items]) => {
             // Extract emoji from category name
             const categoryEmoji = category.match(/^[\p{Emoji}]/u)?.[0] || '🍽️';
             const categoryName = category.replace(/^[\p{Emoji}]\s*/, '') || category;
@@ -410,7 +461,7 @@ const CustomerMenu: React.FC = () => {
                     <span className="text-2xl sm:text-3xl">{categoryEmoji}</span>
                     <h2 className="font-display text-xl sm:text-2xl font-light text-foreground tracking-wide">
                       {categoryName}
-                    </h2>
+              </h2>
                     <span className="text-sm text-muted-foreground font-light">
                       ({items.length})
                     </span>
@@ -421,24 +472,25 @@ const CustomerMenu: React.FC = () => {
                 {/* Menu Items - Classic Restaurant Style */}
                 <div className="bg-card/30 backdrop-blur-sm rounded-lg border border-border/30 p-4 sm:p-6 space-y-0">
                   {items.map((item) => (
-                    <MenuItemCard
-                      key={item.id}
-                      id={item.id}
-                      name={item.name}
-                      price={item.price}
+                  <MenuItemCard
+                    key={item.id}
+                    id={item.id}
+                    name={item.name}
+                    price={item.price}
                       description={item.desc || item.description}
-                      quantity={getItemQuantity(item.id)}
-                      onAdd={() => handleAddItem(item)}
-                      onRemove={() => handleRemoveItem(item.id)}
-                      disabled={session.isLocked}
+                    quantity={getItemQuantity(item.id)}
+                    onAdd={() => handleAddItem(item)}
+                    onRemove={() => handleRemoveItem(item.id)}
+                    disabled={session.isLocked}
                       isLoading={loadingItems.has(item.id)}
-                    />
-                  ))}
-                </div>
-              </section>
+                  />
+                ))}
+              </div>
+            </section>
             );
           })}
         </div>
+        )}
       </main>
 
       {/* Fixed Bottom Actions */}
@@ -451,7 +503,7 @@ const CustomerMenu: React.FC = () => {
           <Button
             className="w-full btn-gold h-12 sm:h-14 text-sm font-light tracking-wider uppercase shadow-lg hover:shadow-xl transition-all touch-manipulation"
             onClick={handleSubmitOrder}
-            disabled={cartItemCount === 0 || isSubmitting}
+            disabled={cartItemCount === 0 || isSubmitting || isMenuHidden}
           >
             {isSubmitting ? (
               <>
@@ -467,7 +519,7 @@ const CustomerMenu: React.FC = () => {
           </Button>
           
           {/* Secondary Actions */}
-          <div className="grid grid-cols-2 gap-2 sm:gap-3">
+          <div className="grid grid-cols-3 gap-2 sm:gap-3">
             <Button
               variant="outline"
               className="h-11 sm:h-12 border-border/50 hover:bg-secondary/50 hover:border-primary/30 transition-all text-sm font-light touch-manipulation"
@@ -477,6 +529,16 @@ const CustomerMenu: React.FC = () => {
               <Bell className="h-4 w-4 mr-2" />
               <span className="hidden xs:inline">Сервитьор</span>
               <span className="xs:hidden">Серв.</span>
+            </Button>
+            <Button
+              variant="outline"
+              className="h-11 sm:h-12 border-border/50 hover:bg-secondary/50 hover:border-primary/30 transition-all text-sm font-light touch-manipulation"
+              onClick={handleCallAnimator}
+              disabled={session.isLocked}
+            >
+              <Sparkles className="h-4 w-4 mr-2" />
+              <span className="hidden xs:inline">Аниматор</span>
+              <span className="xs:hidden">Аним.</span>
             </Button>
             <Button
               variant="outline"
@@ -511,6 +573,14 @@ const CustomerMenu: React.FC = () => {
         onClose={() => setPaymentModalOpen(false)}
         onSelectPayment={handlePaymentSelect}
         total={totalBill}
+      />
+
+      {/* Rating Modal */}
+      <RatingModal
+        open={ratingModalOpen}
+        onClose={() => setRatingModalOpen(false)}
+        tableId={tableId}
+        googlePlaceId={import.meta.env.VITE_GOOGLE_PLACE_ID}
       />
     </div>
   );
