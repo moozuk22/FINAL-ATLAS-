@@ -83,12 +83,8 @@ const CustomerMenu: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isOffline, setIsOffline] = useState(!isOnline());
   
-  // Check if menu should be hidden (after 15:00)
-  const isMenuHidden = useMemo(() => {
-    const now = new Date();
-    const hour = now.getHours();
-    return hour >= 15;
-  }, []);
+  // Check if menu should be hidden (after 15:00) - DISABLED FOR NOW
+  const isMenuHidden = false; // Toggle back: useMemo(() => { const hour = new Date().getHours(); return hour >= 15; }, []);
   
   const session = getTableSession(tableId);
   const cartTotal = getCartTotal(tableId);
