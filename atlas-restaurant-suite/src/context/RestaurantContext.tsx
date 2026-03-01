@@ -49,8 +49,14 @@ export interface TableRequest {
   timestamp: number;
   paymentMethod?: 'cash' | 'card';
   source?: 'nfc' | 'qr' | 'direct';
-  requestType?: 'waiter' | 'bill' | 'animator' | 'order';
+  requestType?: 'waiter' | 'bill' | 'animator' | 'order' | 'kids_zone';
   assignedTo?: string;
+  // Kids zone timer fields
+  childLocation?: 'table' | 'kids_zone' | 'returning_to_table';
+  timerStartedAt?: number; // timestamp when child entered kids zone
+  timerPausedAt?: number; // timestamp when timer was paused (child returned to table)
+  totalTimeElapsed?: number; // total seconds in kids zone
+  hourlyRate?: number; // price per hour (default 10.00 EUR)
 }
 
 export interface TableSession {
@@ -98,6 +104,9 @@ interface RestaurantContextType {
   requestBill: (tableId: string, paymentMethod: 'cash' | 'card', source?: 'nfc' | 'qr' | 'direct') => Promise<void>;
   completeRequest: (tableId: string, requestId: string) => Promise<void>;
   completeAnimatorRequest: (tableId: string, requestId: string, animatorName: string) => Promise<void>;
+  returnChildToTable: (tableId: string, requestId: string) => Promise<void>;
+  takeChildBackToZone: (tableId: string, requestId: string) => Promise<void>;
+  completeChildSession: (tableId: string, requestId: string) => Promise<void>;
   markAsPaid: (tableId: string) => Promise<void>;
   resetTable: (tableId: string) => Promise<void>;
   getCartTotal: (tableId: string) => number;
@@ -274,11 +283,6 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         // Continue with empty requests if requests fail
       }
 
-      if (requestsError) {
-        console.error('Supabase error loading requests:', requestsError);
-        // Continue with empty requests if requests fail
-      }
-
       // Build table sessions
       const sessions: Record<string, TableSession> = {};
       
@@ -351,8 +355,13 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             timestamp: r.timestamp,
             paymentMethod: r.payment_method as 'cash' | 'card' | undefined,
             source: r.source as 'nfc' | 'qr' | 'direct' | undefined,
-            requestType: r.request_type as 'waiter' | 'bill' | 'animator' | 'order' | undefined,
+            requestType: r.request_type as 'waiter' | 'bill' | 'animator' | 'order' | 'kids_zone' | undefined,
             assignedTo: r.assigned_to || undefined,
+            childLocation: r.child_location as 'table' | 'kids_zone' | 'returning_to_table' | undefined,
+            timerStartedAt: r.timer_started_at ? (typeof r.timer_started_at === 'string' ? new Date(r.timer_started_at).getTime() : r.timer_started_at) : undefined,
+            timerPausedAt: r.timer_paused_at ? (typeof r.timer_paused_at === 'string' ? new Date(r.timer_paused_at).getTime() : r.timer_paused_at) : undefined,
+            totalTimeElapsed: r.total_time_elapsed || undefined,
+            hourlyRate: r.hourly_rate ? parseFloat(String(r.hourly_rate)) : undefined,
           }));
 
         sessions[tableId] = {
@@ -743,11 +752,11 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         .insert({
           id: requestId,
           table_id: tableId,
-          action: '🍽️ NEW ORDER',
-          details: orderDetails,
-          total: orderTotal,
-          status: 'pending',
-          timestamp: Date.now(),
+        action: '🍽️ NEW ORDER',
+        details: orderDetails,
+        total: orderTotal,
+        status: 'pending',
+        timestamp: Date.now(),
           source: source,
           request_type: 'order',
         });
@@ -781,13 +790,13 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       await supabase
         .from('table_requests')
         .insert({
-          id: `req_${Date.now()}`,
+        id: `req_${Date.now()}`,
           table_id: tableId,
-          action: '🔔 WAITER CALL',
-          details: 'Customer requested assistance',
-          total: 0,
-          status: 'pending',
-          timestamp: Date.now(),
+        action: '🔔 WAITER CALL',
+        details: 'Customer requested assistance',
+        total: 0,
+        status: 'pending',
+        timestamp: Date.now(),
           source: source,
           request_type: 'waiter',
         });
@@ -811,13 +820,13 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       await supabase
         .from('table_requests')
         .insert({
-          id: `req_${Date.now()}`,
+        id: `req_${Date.now()}`,
           table_id: tableId,
-          action: '💳 BILL REQUEST',
-          details: `Payment: ${paymentMethod === 'cash' ? 'Cash' : 'Card'}`,
-          total: totalBill,
-          status: 'pending',
-          timestamp: Date.now(),
+        action: '💳 BILL REQUEST',
+        details: `Payment: ${paymentMethod === 'cash' ? 'Cash' : 'Card'}`,
+        total: totalBill,
+        status: 'pending',
+        timestamp: Date.now(),
           payment_method: paymentMethod,
           source: source,
           request_type: 'bill',
@@ -874,9 +883,91 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
   }, [loadTableSessions]);
 
+  // Complete child session - calculate final charge and add to bill
+  // MUST be defined before markAsPaid since markAsPaid uses it
+  const completeChildSession = useCallback(async (tableId: string, requestId: string) => {
+    try {
+      // Get current request with all timer data
+      const { data: currentRequest, error: fetchError } = await supabase
+        .from('table_requests')
+        .select('timer_started_at, timer_paused_at, total_time_elapsed, hourly_rate')
+        .eq('id', requestId)
+        .eq('table_id', tableId)
+        .single();
+
+      if (fetchError || !currentRequest) {
+        throw fetchError || new Error('Request not found');
+      }
+
+      const now = new Date().toISOString();
+      const nowTimestamp = Date.now();
+      let finalElapsed = currentRequest.total_time_elapsed || 0;
+
+      // If timer was running, add the elapsed time since it started
+      if (currentRequest.timer_started_at && !currentRequest.timer_paused_at) {
+        const timerStartedAt = typeof currentRequest.timer_started_at === 'string' 
+          ? new Date(currentRequest.timer_started_at).getTime() 
+          : currentRequest.timer_started_at;
+        const elapsedSinceStart = Math.floor((nowTimestamp - timerStartedAt) / 1000);
+        finalElapsed += elapsedSinceStart;
+      }
+
+      // Calculate cost: hours × hourly rate
+      const hours = finalElapsed / 3600; // Convert seconds to hours
+      const hourlyRate = currentRequest.hourly_rate || 10.00;
+      const cost = Math.ceil(hours * hourlyRate * 100) / 100; // Round to 2 decimals
+
+      // Update the request with final values
+      await supabase
+        .from('table_requests')
+        .update({ 
+          child_location: 'table',
+          total_time_elapsed: finalElapsed,
+          timer_paused_at: now
+        })
+        .eq('id', requestId)
+        .eq('table_id', tableId);
+
+      // Create a new request for the kids zone charge
+      if (cost > 0) {
+        await supabase
+          .from('table_requests')
+          .insert({
+            id: `kids_zone_${tableId}_${Date.now()}`,
+            table_id: tableId,
+            action: 'Детски кът',
+            details: `${Math.floor(finalElapsed / 60)} минути в детския кът`,
+            total: cost,
+            status: 'confirmed',
+            timestamp: now,
+            request_type: 'kids_zone',
+            source: 'direct'
+          });
+      }
+
+      loadTableSessions();
+    } catch (error) {
+      console.error('Error completing child session:', error);
+      loadTableSessions();
+      throw error;
+    }
+  }, [loadTableSessions]);
+
   const markAsPaid = useCallback(async (tableId: string) => {
     // Get current table data before clearing for archive
     const currentTable = tables[tableId];
+    
+    // Complete child session if there's an active animator request
+    const animatorRequest = currentTable?.requests.find(req => req.requestType === 'animator' && req.status === 'confirmed');
+    if (animatorRequest && (animatorRequest.childLocation === 'kids_zone' || animatorRequest.childLocation === 'returning_to_table')) {
+      try {
+        await completeChildSession(tableId, animatorRequest.id);
+        console.log(`✅ Completed child session for ${tableId} before payment`);
+      } catch (error) {
+        console.error('Error completing child session before payment:', error);
+        // Continue with payment even if child session completion fails
+      }
+    }
     
     // Optimistic update: clear paid orders immediately
     setTables(prev => {
@@ -1034,7 +1125,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       console.error('Error marking as paid:', error);
       throw error;
     }
-  }, [loadTableSessions, tables]);
+  }, [loadTableSessions, tables, completeChildSession]);
 
   const resetTable = useCallback(async (tableId: string) => {
     // Optimistic update: clear everything immediately
@@ -1265,8 +1356,13 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const getCartTotal = useCallback((tableId: string): number => {
     const table = tables[tableId];
     if (!table) return 0;
-    return table.cart.reduce((sum, i) => sum + (i.price * i.quantity), 0);
-  }, [tables]); // tables is needed to access cart data
+    // Always fetch prices from menuItems to ensure we have the latest prices
+    return table.cart.reduce((sum, cartItem) => {
+      const menuItem = menuItems.find(mi => mi.id === cartItem.id);
+      const price = menuItem?.price || cartItem.price; // Fallback to cart price if menu item not found
+      return sum + (price * cartItem.quantity);
+    }, 0);
+  }, [tables, menuItems]); // Use menuItems to get latest prices
 
   const getCartItemCount = useCallback((tableId: string): number => {
     const table = tables[tableId];
@@ -1337,33 +1433,62 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   // Call animator function
   const callAnimator = useCallback(async (tableId: string, source: 'nfc' | 'qr' | 'direct' = 'direct') => {
     try {
-      await supabase
+      // Check if there's already an active animator request for this table
+      const { data: existingRequest } = await supabase
         .from('table_requests')
-        .insert({
-          id: `req_${Date.now()}`,
-          table_id: tableId,
-          action: '🎭 АНИМАТОР ЗА ДЕТСКИ КЪТ',
-          details: 'Заявка за аниматор',
-          total: 0,
-          status: 'pending',
-          timestamp: Date.now(),
-          source: source,
-          request_type: 'animator',
-        });
+        .select('id, status, child_location')
+        .eq('table_id', tableId)
+        .eq('request_type', 'animator')
+        .in('status', ['pending', 'confirmed'])
+        .order('timestamp', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (existingRequest) {
+        // If there's an active request, just update the timestamp (client is calling again)
+        await supabase
+          .from('table_requests')
+          .update({
+            timestamp: Date.now(),
+            source: source,
+          })
+          .eq('id', existingRequest.id);
+      } else {
+        // Create new request only if there's no active one
+        await supabase
+          .from('table_requests')
+          .insert({
+            id: `req_${Date.now()}`,
+            table_id: tableId,
+            action: '🎭 АНИМАТОР ЗА ДЕТСКИ КЪТ',
+            details: 'Заявка за аниматор',
+            total: 0,
+            status: 'pending',
+            timestamp: Date.now(),
+            source: source,
+            request_type: 'animator',
+          });
+      }
     } catch (error) {
       console.error('Error calling animator:', error);
       throw error;
     }
   }, []);
 
-  // Complete animator request (only animator can do this)
+  // Complete animator request (only animator can do this) - starts timer
   const completeAnimatorRequest = useCallback(async (tableId: string, requestId: string, animatorName: string) => {
     try {
+      const now = new Date().toISOString();
       const { error: updateError } = await supabase
         .from('table_requests')
         .update({ 
           status: 'confirmed',
-          assigned_to: animatorName
+          assigned_to: animatorName,
+          child_location: 'kids_zone',
+          timer_started_at: now,
+          timer_paused_at: null,
+          total_time_elapsed: 0,
+          hourly_rate: 10.00 // Default 10 EUR per hour
         })
         .eq('id', requestId)
         .eq('table_id', tableId)
@@ -1376,6 +1501,82 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
     } catch (error) {
       console.error('Error completing animator request:', error);
+      loadTableSessions();
+      throw error;
+    }
+  }, [loadTableSessions]);
+
+  // Return child to table - pauses timer
+  const returnChildToTable = useCallback(async (tableId: string, requestId: string) => {
+    try {
+      // Get current request to calculate elapsed time
+      const { data: currentRequest, error: fetchError } = await supabase
+        .from('table_requests')
+        .select('timer_started_at, timer_paused_at, total_time_elapsed')
+        .eq('id', requestId)
+        .eq('table_id', tableId)
+        .single();
+
+      if (fetchError || !currentRequest) {
+        throw fetchError || new Error('Request not found');
+      }
+
+      const now = new Date().toISOString();
+      const nowTimestamp = Date.now();
+      let newElapsed = currentRequest.total_time_elapsed || 0;
+
+      // If timer was running, add the elapsed time since it started
+      if (currentRequest.timer_started_at && !currentRequest.timer_paused_at) {
+        const timerStartedAt = typeof currentRequest.timer_started_at === 'string' 
+          ? new Date(currentRequest.timer_started_at).getTime() 
+          : currentRequest.timer_started_at;
+        const elapsedSinceStart = Math.floor((nowTimestamp - timerStartedAt) / 1000);
+        newElapsed += elapsedSinceStart;
+      }
+
+      const { error: updateError } = await supabase
+        .from('table_requests')
+        .update({ 
+          child_location: 'returning_to_table',
+          timer_paused_at: now,
+          total_time_elapsed: newElapsed
+        })
+        .eq('id', requestId)
+        .eq('table_id', tableId);
+
+      if (updateError) {
+        console.error('Error returning child to table:', updateError);
+        loadTableSessions();
+        throw updateError;
+      }
+    } catch (error) {
+      console.error('Error returning child to table:', error);
+      loadTableSessions();
+      throw error;
+    }
+  }, [loadTableSessions]);
+
+  // Take child back to zone - resumes timer
+  const takeChildBackToZone = useCallback(async (tableId: string, requestId: string) => {
+    try {
+      const now = new Date().toISOString();
+      const { error: updateError } = await supabase
+        .from('table_requests')
+        .update({ 
+          child_location: 'kids_zone',
+          timer_started_at: now, // Restart timer from now
+          timer_paused_at: null
+        })
+        .eq('id', requestId)
+        .eq('table_id', tableId);
+
+      if (updateError) {
+        console.error('Error taking child back to zone:', updateError);
+        loadTableSessions();
+        throw updateError;
+      }
+    } catch (error) {
+      console.error('Error taking child back to zone:', error);
       loadTableSessions();
       throw error;
     }
@@ -1526,6 +1727,9 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       requestBill,
       completeRequest,
       completeAnimatorRequest,
+      returnChildToTable,
+      takeChildBackToZone,
+      completeChildSession,
     markAsPaid,
       resetTable,
       getCartTotal,
@@ -1554,6 +1758,9 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       requestBill,
       completeRequest,
       completeAnimatorRequest,
+      returnChildToTable,
+      takeChildBackToZone,
+      completeChildSession,
     markAsPaid,
       resetTable,
       getCartTotal,

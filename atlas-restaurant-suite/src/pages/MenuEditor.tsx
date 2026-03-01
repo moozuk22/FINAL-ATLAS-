@@ -1,11 +1,12 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Plus, Edit2, Trash2, Save, X, GripVertical, MoreVertical, Merge, CheckSquare, Square } from 'lucide-react';
+import { ArrowLeft, Plus, Edit2, Trash2, Save, X, GripVertical, MoreVertical, Merge, CheckSquare, Square, Calendar } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useRestaurant, MenuItem } from '@/context/RestaurantContext';
 import { useToast } from '@/hooks/use-toast';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import {
   Dialog,
   DialogContent,
@@ -301,7 +302,7 @@ const NewCategorySection: React.FC<{
 const MenuEditor: React.FC = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { menuItems, addMenuItem, updateMenuItem, deleteMenuItem, loading } = useRestaurant();
+  const { menuItems, addMenuItem, updateMenuItem, deleteMenuItem, getDailyMenuItems, setDailyMenuItems, loading } = useRestaurant();
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [formData, setFormData] = useState({
@@ -326,6 +327,13 @@ const MenuEditor: React.FC = () => {
   const [categoryOrder, setCategoryOrder] = useState<string[]>([]);
   // Statistics
   const [lastUpdateTime, setLastUpdateTime] = useState<Date | null>(null);
+  // Daily Menu state
+  const [activeTab, setActiveTab] = useState('edit');
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [dailyItems, setDailyItems] = useState<MenuItem[]>([]);
+  const [dailyMenuLoading, setDailyMenuLoading] = useState(false);
+  const [editingDailyItem, setEditingDailyItem] = useState<string | null>(null);
+  const [editDailyText, setEditDailyText] = useState('');
 
   // Sensors for drag and drop
   const sensors = useSensors(
@@ -901,6 +909,83 @@ const MenuEditor: React.FC = () => {
     }
   };
 
+  // Daily Menu functions
+  const loadDailyMenu = useCallback(async () => {
+    setDailyMenuLoading(true);
+    try {
+      const items = await getDailyMenuItems(selectedDate);
+      setDailyItems(items);
+    } catch (error) {
+      console.error('Error loading daily menu:', error);
+      toast({
+        title: 'Грешка',
+        description: 'Неуспешно зареждане на меню за деня',
+        variant: 'destructive',
+      });
+    } finally {
+      setDailyMenuLoading(false);
+    }
+  }, [selectedDate, getDailyMenuItems, toast]);
+
+  useEffect(() => {
+    if (activeTab === 'daily') {
+      loadDailyMenu();
+    }
+  }, [activeTab, loadDailyMenu]);
+
+  const handleAddToDaily = async (item: MenuItem) => {
+    try {
+      const currentItemIds = dailyItems.map(i => i.id);
+      if (currentItemIds.includes(item.id)) {
+        toast({
+          title: 'Информация',
+          description: 'Артикулът вече е в менюто за деня',
+        });
+        return;
+      }
+
+      const newItemIds = [...currentItemIds, item.id];
+      await setDailyMenuItems(selectedDate, newItemIds);
+      await loadDailyMenu();
+      toast({
+        title: '✅ Добавено',
+        description: `${item.name} е добавено в менюто за деня`,
+      });
+    } catch (error) {
+      console.error('Error adding to daily menu:', error);
+      toast({
+        title: 'Грешка',
+        description: 'Неуспешно добавяне на артикул',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleRemoveFromDaily = async (itemId: string) => {
+    try {
+      const currentItemIds = dailyItems.map(i => i.id);
+      const newItemIds = currentItemIds.filter(id => id !== itemId);
+      await setDailyMenuItems(selectedDate, newItemIds);
+      await loadDailyMenu();
+      toast({
+        title: '✅ Премахнато',
+        description: 'Артикулът е премахнат от менюто за деня',
+      });
+    } catch (error) {
+      console.error('Error removing from daily menu:', error);
+      toast({
+        title: 'Грешка',
+        description: 'Неуспешно премахване',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const availableItems = useMemo(() => {
+    const dailyItemIds = dailyItems.map(i => i.id);
+    return menuItems.filter(item => !dailyItemIds.includes(item.id));
+  }, [menuItems, dailyItems]);
+
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
@@ -1079,6 +1164,13 @@ const MenuEditor: React.FC = () => {
 
       {/* Menu Items */}
       <main className="max-w-6xl mx-auto px-6 py-8">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <TabsList className="grid w-full max-w-md grid-cols-2 mb-6">
+            <TabsTrigger value="edit">Редактирай меню</TabsTrigger>
+            <TabsTrigger value="daily">Меню за деня</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="edit" className="mt-0">
         {loading ? (
           <div className="flex items-center justify-center py-20">
             <div className="text-center">
@@ -1151,6 +1243,140 @@ const MenuEditor: React.FC = () => {
             </DragOverlay>
           </DndContext>
         )}
+          </TabsContent>
+
+          <TabsContent value="daily" className="mt-0">
+            <div className="space-y-4">
+              <div className="flex items-center gap-4 mb-4">
+                <Input
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)}
+                  className="w-auto"
+                />
+                <Button onClick={loadDailyMenu} disabled={dailyMenuLoading} variant="outline">
+                  Зареди
+                </Button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                {/* All Items Column */}
+                <div className="border rounded-lg p-4 overflow-y-auto max-h-[70vh]">
+                  <h3 className="font-semibold mb-3">Всички артикули</h3>
+                  {dailyMenuLoading ? (
+                    <p className="text-muted-foreground text-sm">Зареждане...</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {availableItems.map(item => (
+                        <div
+                          key={item.id}
+                          className="flex items-center justify-between p-2 border rounded hover:bg-secondary/50"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">{item.name}</p>
+                            <p className="text-xs text-muted-foreground">{item.price.toFixed(2)} EUR</p>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleAddToDaily(item)}
+                            className="ml-2"
+                          >
+                            Добави
+                          </Button>
+                        </div>
+                      ))}
+                      {availableItems.length === 0 && (
+                        <p className="text-muted-foreground text-sm text-center py-4">
+                          Всички артикули са в менюто за деня
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Daily Menu Items Column */}
+                <div className="border rounded-lg p-4 overflow-y-auto max-h-[70vh]">
+                  <h3 className="font-semibold mb-3">Меню за деня</h3>
+                  {dailyMenuLoading ? (
+                    <p className="text-muted-foreground text-sm">Зареждане...</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {dailyItems.map(item => (
+                        <div
+                          key={item.id}
+                          className="flex items-center justify-between p-2 border rounded hover:bg-secondary/50"
+                        >
+                          <div className="flex-1 min-w-0">
+                            {editingDailyItem === item.id ? (
+                              <Input
+                                value={editDailyText}
+                                onChange={(e) => setEditDailyText(e.target.value)}
+                                className="h-8 text-sm"
+                                autoFocus
+                              />
+                            ) : (
+                              <>
+                                <p className="text-sm font-medium truncate">{item.name}</p>
+                                <p className="text-xs text-muted-foreground">{item.price.toFixed(2)} EUR</p>
+                              </>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1 ml-2">
+                            {editingDailyItem === item.id ? (
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => {
+                                    setEditingDailyItem(null);
+                                    setEditDailyText('');
+                                  }}
+                                  className="h-8 w-8 p-0"
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </>
+                            ) : (
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => {
+                                    setEditingDailyItem(item.id);
+                                    setEditDailyText(item.name);
+                                  }}
+                                  className="h-8 w-8 p-0"
+                                  title="Редактирай"
+                                >
+                                  <Edit2 className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => handleRemoveFromDaily(item.id)}
+                                  className="h-8 w-8 p-0 text-destructive"
+                                  title="Премахни"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                      {dailyItems.length === 0 && (
+                        <p className="text-muted-foreground text-sm text-center py-4">
+                          Няма артикули в менюто за деня
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </TabsContent>
+        </Tabs>
       </main>
 
       {/* Merge Category Dialog */}

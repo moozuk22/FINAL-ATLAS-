@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, CheckCircle2, Loader2 } from 'lucide-react';
+import { CheckCircle2, Loader2, Clock, Home, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useRestaurant } from '@/context/RestaurantContext';
 import { useToast } from '@/hooks/use-toast';
@@ -31,10 +31,12 @@ const playAlertSound = () => {
 const KidsZoneDashboard: React.FC = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { tables, completeAnimatorRequest, loading } = useRestaurant();
+  const { tables, completeAnimatorRequest, returnChildToTable, takeChildBackToZone, completeChildSession, loading } = useRestaurant();
   const [completingRequests, setCompletingRequests] = useState<Set<string>>(new Set());
-  const [animatorName, setAnimatorName] = useState<string>('');
+  const [returningRequests, setReturningRequests] = useState<Set<string>>(new Set());
+  const [takingBackRequests, setTakingBackRequests] = useState<Set<string>>(new Set());
   const prevPendingAnimatorCountRef = useRef<number>(0);
+  const [currentTime, setCurrentTime] = useState(Date.now());
 
   // Get all table IDs
   const tableIds = useMemo(() => 
@@ -67,6 +69,42 @@ const KidsZoneDashboard: React.FC = () => {
     prevPendingAnimatorCountRef.current = pendingAnimatorCount;
   }, [pendingAnimatorCount]);
 
+  // Update current time every second for timer display
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Calculate timer display for a request
+  // Timer only counts when child is in kids_zone (not paused, not on table)
+  const calculateTimer = useCallback((request: any) => {
+    // Timer only exists if child has been in kids zone at least once
+    if (!request.timerStartedAt && !request.totalTimeElapsed) return null;
+    
+    let totalSeconds = request.totalTimeElapsed || 0;
+    
+    // Only add elapsed time if child is currently in kids_zone and timer is not paused
+    if (request.childLocation === 'kids_zone' && !request.timerPausedAt && request.timerStartedAt) {
+      const elapsedSinceStart = Math.floor((currentTime - request.timerStartedAt) / 1000);
+      totalSeconds += elapsedSinceStart;
+    }
+    
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    
+    return {
+      hours,
+      minutes,
+      seconds,
+      totalSeconds,
+      cost: request.hourlyRate ? Math.ceil((totalSeconds / 3600) * request.hourlyRate * 100) / 100 : 0,
+      isRunning: request.childLocation === 'kids_zone' && !request.timerPausedAt
+    };
+  }, [currentTime]);
+
   // Get tables with animator requests (pending or confirmed)
   const getTableAnimatorStatus = useCallback((tableId: string) => {
     const table = tables[tableId];
@@ -78,23 +116,18 @@ const KidsZoneDashboard: React.FC = () => {
     
     if (!animatorReq) return null;
     
+    const timer = calculateTimer(animatorReq);
+    
     return {
       request: animatorReq,
       status: animatorReq.status,
       assignedTo: animatorReq.assignedTo,
+      childLocation: animatorReq.childLocation,
+      timer,
     };
-  }, [tables]);
+  }, [tables, calculateTimer]);
 
   const handleCompleteAnimatorRequest = useCallback(async (tableId: string, requestId: string) => {
-    if (!animatorName.trim()) {
-      toast({
-        title: 'Грешка',
-        description: 'Моля, въведете вашето име',
-        variant: 'destructive',
-      });
-      return;
-    }
-
     const requestKey = `${tableId}_${requestId}`;
     
     if (completingRequests.has(requestKey)) {
@@ -104,10 +137,10 @@ const KidsZoneDashboard: React.FC = () => {
     setCompletingRequests(prev => new Set(prev).add(requestKey));
     
     try {
-      await completeAnimatorRequest(tableId, requestId, animatorName.trim());
+      await completeAnimatorRequest(tableId, requestId, 'Аниматор');
       toast({
         title: '✅ Заявката е приета',
-        description: `Детето от ${tableId.replace('_', ' ')} е прието в детския кът`,
+        description: `Детето от ${tableId.replace('_', ' ')} е прието в детския кът. Таймерът започна.`,
       });
     } catch (error) {
       console.error('Error completing animator request:', error);
@@ -123,7 +156,69 @@ const KidsZoneDashboard: React.FC = () => {
         return next;
       });
     }
-  }, [animatorName, completeAnimatorRequest, toast, completingRequests]);
+  }, [completeAnimatorRequest, toast, completingRequests]);
+
+  const handleReturnChildToTable = useCallback(async (tableId: string, requestId: string) => {
+    const requestKey = `${tableId}_${requestId}`;
+    
+    if (returningRequests.has(requestKey)) {
+      return;
+    }
+    
+    setReturningRequests(prev => new Set(prev).add(requestKey));
+    
+    try {
+      await returnChildToTable(tableId, requestId);
+      toast({
+        title: '✅ Детето е върнато на масата',
+        description: `Таймерът е паузиран за ${tableId.replace('_', ' ')}`,
+      });
+    } catch (error) {
+      console.error('Error returning child to table:', error);
+      toast({
+        title: 'Грешка',
+        description: 'Неуспешно връщане на детето',
+        variant: 'destructive',
+      });
+    } finally {
+      setReturningRequests(prev => {
+        const next = new Set(prev);
+        next.delete(requestKey);
+        return next;
+      });
+    }
+  }, [returnChildToTable, toast, returningRequests]);
+
+  const handleTakeChildBackToZone = useCallback(async (tableId: string, requestId: string) => {
+    const requestKey = `${tableId}_${requestId}`;
+    
+    if (takingBackRequests.has(requestKey)) {
+      return;
+    }
+    
+    setTakingBackRequests(prev => new Set(prev).add(requestKey));
+    
+    try {
+      await takeChildBackToZone(tableId, requestId);
+      toast({
+        title: '✅ Детето е взето обратно',
+        description: `Таймерът продължава за ${tableId.replace('_', ' ')}`,
+      });
+    } catch (error) {
+      console.error('Error taking child back to zone:', error);
+      toast({
+        title: 'Грешка',
+        description: 'Неуспешно вземане на детето',
+        variant: 'destructive',
+      });
+    } finally {
+      setTakingBackRequests(prev => {
+        const next = new Set(prev);
+        next.delete(requestKey);
+        return next;
+      });
+    }
+  }, [takeChildBackToZone, toast, takingBackRequests]);
 
   return (
     <div className="min-h-screen pb-20 sm:pb-24">
@@ -132,37 +227,17 @@ const KidsZoneDashboard: React.FC = () => {
         <div className="container mx-auto px-4 sm:px-6 py-3 sm:py-4">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
             <div className="flex items-center gap-3 sm:gap-4 w-full sm:w-auto">
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-10 w-10 sm:h-11 sm:w-11 rounded-full hover:bg-secondary touch-manipulation flex-shrink-0"
-                onClick={() => navigate('/admin')}
-                aria-label="Go back"
-              >
-                <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
-              </Button>
               <div className="min-w-0 flex-1 sm:flex-none">
                 <h1 className="font-display text-xl sm:text-2xl font-bold text-gold tracking-wide truncate">
-                  🎭 Детски Кът
+                  🎭 Аниматор Dashboard
                 </h1>
                 <p className="text-xs sm:text-sm text-muted-foreground mt-0.5 truncate">
-                  Аниматор Панел
+                  Управление на детския кът
                 </p>
               </div>
             </div>
             
-            <div className="flex items-center gap-3 sm:gap-4 w-full sm:w-auto justify-between sm:justify-end">
-              {/* Animator Name Input */}
-              <div className="flex items-center gap-2 flex-1 sm:flex-none">
-                <input
-                  type="text"
-                  value={animatorName}
-                  onChange={(e) => setAnimatorName(e.target.value)}
-                  placeholder="Вашето име"
-                  className="px-3 py-2 border border-border rounded-lg bg-background text-sm flex-1 sm:flex-none sm:w-40"
-                />
-              </div>
-              
+            <div className="flex items-center gap-3 sm:gap-4 w-full sm:w-auto justify-end">
               {/* Pending Alerts */}
               <div className="text-center min-w-[60px] sm:min-w-[80px]">
                 <p className="text-xs text-muted-foreground uppercase tracking-wider">
@@ -196,6 +271,9 @@ const KidsZoneDashboard: React.FC = () => {
               const animatorStatus = getTableAnimatorStatus(tableId);
               const hasPendingRequest = animatorStatus?.status === 'pending';
               const hasConfirmedRequest = animatorStatus?.status === 'confirmed';
+              const isInKidsZone = animatorStatus?.childLocation === 'kids_zone';
+              const isReturningToTable = animatorStatus?.childLocation === 'returning_to_table';
+              const isOnTable = !animatorStatus?.childLocation || animatorStatus?.childLocation === 'table';
               
               return (
                 <div
@@ -203,7 +281,8 @@ const KidsZoneDashboard: React.FC = () => {
                   className={cn(
                     'card-premium rounded-xl overflow-hidden transition-all relative',
                     hasPendingRequest && 'border-destructive pulse-alert',
-                    hasConfirmedRequest && 'border-yellow-500',
+                    isInKidsZone && 'border-yellow-500',
+                    isReturningToTable && 'border-blue-500',
                     !animatorStatus && 'border-border'
                   )}
                 >
@@ -223,9 +302,19 @@ const KidsZoneDashboard: React.FC = () => {
                           ⚠️ НОВА ЗАЯВКА
                         </span>
                       )}
-                      {hasConfirmedRequest && (
-                        <span className="text-xs font-semibold text-yellow-600">
-                          ✓ Прието
+                      {isInKidsZone && (
+                        <span className="text-xs font-semibold text-yellow-600 animate-pulse">
+                          🎭 В къта • Таймер активен
+                        </span>
+                      )}
+                      {isReturningToTable && (
+                        <span className="text-xs font-semibold text-blue-600">
+                          🏠 На масата • Таймер паузиран
+                        </span>
+                      )}
+                      {hasConfirmedRequest && isOnTable && (
+                        <span className="text-xs font-semibold text-muted-foreground">
+                          ✅ Готово
                         </span>
                       )}
                     </div>
@@ -234,8 +323,8 @@ const KidsZoneDashboard: React.FC = () => {
                   {/* Content */}
                   <div className="p-3 sm:p-4">
                     {!animatorStatus ? (
-                      <p className="text-center text-muted-foreground text-xs sm:text-sm py-4">
-                        Няма заявка
+                      <p className="text-center text-muted-foreground text-sm py-4">
+                        —
                       </p>
                     ) : (
                       <div className="space-y-3">
@@ -255,23 +344,134 @@ const KidsZoneDashboard: React.FC = () => {
                             </p>
                           )}
                         </div>
+
+                        {/* Timer Display - Only shows when child is in kids zone */}
+                        {animatorStatus.timer && (
+                          <div className={cn(
+                            "rounded-lg p-3 border",
+                            animatorStatus.timer.isRunning 
+                              ? "bg-yellow-500/10 border-yellow-500/30" 
+                              : "bg-muted/50 border-border/50"
+                          )}>
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-2">
+                                <Clock className={cn(
+                                  "h-4 w-4",
+                                  animatorStatus.timer.isRunning ? "text-yellow-600" : "text-muted-foreground"
+                                )} />
+                                <span className="text-xs font-semibold text-muted-foreground">
+                                  {animatorStatus.timer.isRunning ? 'Активен таймер' : 'Паузиран'}
+                                </span>
+                              </div>
+                              <span className={cn(
+                                "font-mono text-xl font-bold",
+                                animatorStatus.timer.isRunning ? "text-yellow-600" : "text-muted-foreground"
+                              )}>
+                                {String(animatorStatus.timer.hours).padStart(2, '0')}:
+                                {String(animatorStatus.timer.minutes).padStart(2, '0')}:
+                                {String(animatorStatus.timer.seconds).padStart(2, '0')}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-semibold text-muted-foreground">Текуща такса:</span>
+                              <span className={cn(
+                                "font-semibold",
+                                animatorStatus.timer.isRunning ? "text-yellow-600" : "text-muted-foreground"
+                              )}>
+                                {animatorStatus.timer.cost.toFixed(2)} EUR
+                              </span>
+                            </div>
+                            {!animatorStatus.timer.isRunning && animatorStatus.timer.totalSeconds > 0 && (
+                              <div className="mt-2 pt-2 border-t border-border/50 text-xs text-muted-foreground">
+                                Таймерът е на пауза. Детето е на масата.
+                              </div>
+                            )}
+                          </div>
+                        )}
                         
+                        {/* Status Flow Indicator */}
+                        {hasConfirmedRequest && (
+                          <div className="bg-muted/30 rounded-lg p-3 border border-border/50 space-y-2">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-semibold text-muted-foreground">Статус:</span>
+                              <div className="flex items-center gap-2">
+                                {isInKidsZone && (
+                                  <span className="text-xs font-semibold text-yellow-600 flex items-center gap-1.5">
+                                    <div className="h-2 w-2 rounded-full bg-yellow-600 animate-pulse" />
+                                    В детския кът
+                                  </span>
+                                )}
+                                {isReturningToTable && (
+                                  <span className="text-xs font-semibold text-blue-600 flex items-center gap-1.5">
+                                    <div className="h-2 w-2 rounded-full bg-blue-600" />
+                                    На масата
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* Action Buttons */}
                         {hasPendingRequest && (
                           <Button
-                            size="sm"
-                            className="w-full btn-gold"
+                            size="lg"
+                            className="w-full h-12 btn-gold font-bold text-base shadow-lg hover:shadow-xl transition-all"
                             onClick={() => handleCompleteAnimatorRequest(tableId, animatorStatus.request.id)}
-                            disabled={completingRequests.has(`${tableId}_${animatorStatus.request.id}`) || !animatorName.trim()}
+                            disabled={completingRequests.has(`${tableId}_${animatorStatus.request.id}`)}
                           >
                             {completingRequests.has(`${tableId}_${animatorStatus.request.id}`) ? (
                               <>
-                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                <Loader2 className="h-5 w-5 mr-2 animate-spin" />
                                 Приемане...
                               </>
                             ) : (
                               <>
-                                <CheckCircle2 className="h-4 w-4 mr-2" />
+                                <CheckCircle2 className="h-6 w-6 mr-2" />
                                 Приеми детето
+                              </>
+                            )}
+                          </Button>
+                        )}
+
+                        {isInKidsZone && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="w-full h-10 border-blue-500 text-blue-600 hover:bg-blue-50 font-semibold"
+                            onClick={() => handleReturnChildToTable(tableId, animatorStatus.request.id)}
+                            disabled={returningRequests.has(`${tableId}_${animatorStatus.request.id}`)}
+                          >
+                            {returningRequests.has(`${tableId}_${animatorStatus.request.id}`) ? (
+                              <>
+                                <Loader2 className="h-5 w-5 mr-1.5 animate-spin" />
+                                Връщане...
+                              </>
+                            ) : (
+                              <>
+                                <Home className="h-5 w-5 mr-1.5" />
+                                Върни на масата
+                              </>
+                            )}
+                          </Button>
+                        )}
+
+                        {isReturningToTable && (
+                          <Button
+                            size="sm"
+                            className="w-full h-10 btn-gold font-semibold"
+                            onClick={() => handleTakeChildBackToZone(tableId, animatorStatus.request.id)}
+                            disabled={takingBackRequests.has(`${tableId}_${animatorStatus.request.id}`)}
+                          >
+                            {takingBackRequests.has(`${tableId}_${animatorStatus.request.id}`) ? (
+                              <>
+                                <Loader2 className="h-5 w-5 mr-1.5 animate-spin" />
+                                Вземане...
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles className="h-5 w-5 mr-1.5" />
+                                Вземи обратно в къта
                               </>
                             )}
                           </Button>
@@ -304,6 +504,10 @@ const KidsZoneDashboard: React.FC = () => {
             <div className="flex items-center gap-2">
               <span className="h-2.5 w-2.5 sm:h-3 sm:w-3 rounded-full bg-yellow-500 flex-shrink-0" />
               <span className="text-muted-foreground whitespace-nowrap">Детето е в къта</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="h-2.5 w-2.5 sm:h-3 sm:w-3 rounded-full bg-blue-500 flex-shrink-0" />
+              <span className="text-muted-foreground whitespace-nowrap">Детето е на масата</span>
             </div>
           </div>
         </div>

@@ -55,25 +55,6 @@ const TableOptions: React.FC = () => {
             </div>
           </Button>
 
-          {/* Animator Option */}
-          <Button
-            onClick={() => navigate(`/menu?table=${tableId}&action=animator`)}
-            className="w-full card-premium rounded-xl p-6 hover:border-primary transition-all group h-auto"
-            variant="ghost"
-          >
-            <div className="flex items-center justify-between w-full">
-              <div className="flex items-center gap-4">
-                <div className="h-12 w-12 rounded-full bg-primary/20 flex items-center justify-center">
-                  <Sparkles className="h-6 w-6 text-primary" />
-                </div>
-                <div className="text-left">
-                  <h3 className="font-display text-lg font-semibold">🎭 Аниматор</h3>
-                  <p className="text-sm text-muted-foreground">Заявка за аниматор</p>
-                </div>
-              </div>
-              <ArrowRight className="h-5 w-5 text-muted-foreground group-hover:text-primary transition-colors" />
-            </div>
-          </Button>
         </div>
       </div>
     </div>

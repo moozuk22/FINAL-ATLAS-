@@ -1,11 +1,10 @@
 import React, { useEffect, useRef, useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Utensils, Loader2, Calendar, TrendingUp, Clock, Sparkles } from 'lucide-react';
+import { Utensils, Loader2, TrendingUp, Clock, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useRestaurant } from '@/context/RestaurantContext';
 import TableCard from '@/components/TableCard';
 import { useToast } from '@/hooks/use-toast';
-import DailyMenuEditor from '@/components/DailyMenuEditor';
 import RevenueReport from '@/components/RevenueReport';
 import PendingOrders from '@/components/PendingOrders';
 
@@ -37,7 +36,6 @@ const StaffDashboard: React.FC = () => {
   const { tables, completeRequest, markAsPaid, resetTable, loading } = useRestaurant();
   const prevPendingCountRef = useRef<number>(0);
   const [completingRequests, setCompletingRequests] = useState<Set<string>>(new Set());
-  const [dailyMenuOpen, setDailyMenuOpen] = useState(false);
   const [revenueReportOpen, setRevenueReportOpen] = useState(false);
   const [pendingOrdersOpen, setPendingOrdersOpen] = useState(false);
   
@@ -156,15 +154,6 @@ const StaffDashboard: React.FC = () => {
         <div className="container mx-auto px-4 sm:px-6 py-3 sm:py-4">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
             <div className="flex items-center gap-3 sm:gap-4 w-full sm:w-auto">
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-10 w-10 sm:h-11 sm:w-11 rounded-full hover:bg-secondary touch-manipulation flex-shrink-0"
-                onClick={() => navigate('/')}
-                aria-label="Go back"
-              >
-                <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
-              </Button>
               <div className="min-w-0 flex-1 sm:flex-none">
                 <h1 className="font-display text-xl sm:text-2xl font-bold text-gold tracking-wide truncate">
                   ATLAS HOUSE
@@ -181,61 +170,54 @@ const StaffDashboard: React.FC = () => {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setDailyMenuOpen(true)}
+                  onClick={() => navigate('/admin/menu')}
                   className="gap-1 text-xs h-8 sm:h-9 touch-manipulation"
-                  aria-label="Daily Menu"
+                  aria-label="Menu"
                 >
-                  <Calendar className="h-3 w-3 sm:h-4 sm:w-4" />
-                  <span className="hidden lg:inline">Меню за деня</span>
+                  <Utensils className="h-3 w-3 sm:h-4 sm:w-4" />
+                  <span className="hidden sm:inline">Меню</span>
+                  <span className="sm:hidden">📋</span>
                 </Button>
+                
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => setRevenueReportOpen(true)}
-                  className="gap-1 text-xs h-8 sm:h-9 touch-manipulation"
+                  className="gap-1 text-xs h-9 sm:h-10 touch-manipulation"
                   aria-label="Revenue Report"
                 >
-                  <TrendingUp className="h-3 w-3 sm:h-4 sm:w-4" />
-                  <span className="hidden lg:inline">Оборот</span>
+                  <TrendingUp className="h-4 w-4" />
+                  <span className="hidden sm:inline">Оборот</span>
+                  <span className="sm:hidden">💰</span>
                 </Button>
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => setPendingOrdersOpen(true)}
-                  className="gap-1 text-xs h-8 sm:h-9 touch-manipulation"
+                  className="gap-1 text-xs h-9 sm:h-10 touch-manipulation"
                   aria-label="Pending Orders"
                 >
-                  <Clock className="h-3 w-3 sm:h-4 sm:w-4" />
-                  <span className="hidden lg:inline">Чакащи</span>
+                  <Clock className="h-4 w-4" />
+                  <span className="hidden sm:inline">Чакащи</span>
+                  <span className="sm:hidden">⏱️</span>
                 </Button>
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => navigate('/admin/kids-zone')}
-                  className="gap-1 text-xs h-8 sm:h-9 touch-manipulation"
-                  aria-label="Kids Zone"
+                  className="gap-1 text-xs h-9 sm:h-10 touch-manipulation"
+                  aria-label="Kids Zone Admin"
                 >
-                  <Sparkles className="h-3 w-3 sm:h-4 sm:w-4" />
-                  <span className="hidden lg:inline">Детски кът</span>
+                  <Sparkles className="h-4 w-4" />
+                  <span className="hidden sm:inline">Kids Zone</span>
+                  <span className="sm:hidden">🎭</span>
                 </Button>
               </div>
               
-              {/* Menu Editor Button */}
-              <Button
-                variant="outline"
-                onClick={() => navigate('/admin/menu')}
-                className="gap-2 text-xs sm:text-sm h-9 sm:h-10 touch-manipulation"
-                aria-label="Edit menu"
-              >
-                <Utensils className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                <span className="hidden sm:inline">Edit Menu</span>
-                <span className="sm:hidden">Menu</span>
-              </Button>
-              
               {/* Pending Alerts */}
               <div className="text-center min-w-[60px] sm:min-w-[80px]">
-                <p className="text-xs text-muted-foreground uppercase tracking-wider">
-                  Pending
+                <p className="text-xs font-semibold text-muted-foreground">
+                  Чакащи
                 </p>
                 <p className={`font-display text-xl sm:text-2xl font-bold ${totalPending > 0 ? 'text-destructive animate-pulse' : 'text-success'}`}>
                   {totalPending}
@@ -244,8 +226,8 @@ const StaffDashboard: React.FC = () => {
               
               {/* Total Revenue */}
               <div className="text-center min-w-[80px] sm:min-w-[100px]">
-                <p className="text-xs text-muted-foreground uppercase tracking-wider">
-                  Revenue
+                <p className="text-xs font-semibold text-muted-foreground">
+                  Оборот
                 </p>
                 <p className="font-display text-xl sm:text-2xl font-bold text-primary truncate">
                   {totalRevenue.toFixed(2)} EUR
@@ -292,7 +274,6 @@ const StaffDashboard: React.FC = () => {
       </main>
 
       {/* Modals */}
-      <DailyMenuEditor open={dailyMenuOpen} onClose={() => setDailyMenuOpen(false)} />
       <RevenueReport open={revenueReportOpen} onClose={() => setRevenueReportOpen(false)} />
       <PendingOrders open={pendingOrdersOpen} onClose={() => setPendingOrdersOpen(false)} />
 

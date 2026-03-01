@@ -104,52 +104,52 @@ const RatingModal: React.FC<RatingModalProps> = ({ open, onClose, tableId, googl
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="text-center text-xl">
-            Оценете преживяването си
+      <DialogContent className="w-[95vw] max-w-md mx-auto p-4 sm:p-6 max-h-[90vh] overflow-y-auto">
+        <DialogHeader className="pb-3">
+          <DialogTitle className="text-center text-lg sm:text-xl font-bold">
+            Оценете ни
           </DialogTitle>
-          <DialogDescription className="text-center">
-            Докато сметката пътува към вас, бихте ли помогнали да подобрим нашето обслужване?
+          <DialogDescription className="text-center text-sm sm:text-base mt-2">
+            Помогнете ни да се подобрим
           </DialogDescription>
         </DialogHeader>
 
         {!showFeedback ? (
-          <div className="space-y-6 py-4">
-            <div className="flex justify-center gap-4">
+          <div className="space-y-4 sm:space-y-6 py-2 sm:py-4">
+            <div className="flex justify-center gap-2 sm:gap-3 flex-wrap">
               {emojis.map(({ value, emoji, label }) => (
                 <button
                   key={value}
                   onClick={() => handleRatingClick(value)}
                   disabled={submitting}
-                  className={`flex flex-col items-center gap-2 p-3 rounded-lg transition-all ${
+                  className={`flex flex-col items-center gap-1.5 sm:gap-2 p-3 sm:p-4 rounded-xl transition-all touch-manipulation min-w-[60px] sm:min-w-[70px] ${
                     rating === value
-                      ? 'bg-primary/20 scale-110'
-                      : 'hover:bg-secondary/50'
+                      ? 'bg-primary/20 scale-105 sm:scale-110 ring-2 ring-primary/50'
+                      : 'hover:bg-secondary/50 active:scale-95'
                   } ${submitting ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                 >
-                  <span className="text-4xl">{emoji}</span>
-                  <span className="text-xs text-muted-foreground">{label}</span>
+                  <span className="text-3xl sm:text-4xl">{emoji}</span>
+                  <span className="text-[10px] sm:text-xs text-muted-foreground font-medium">{label}</span>
                 </button>
               ))}
             </div>
           </div>
         ) : (
-          <div className="space-y-4 py-4">
+          <div className="space-y-3 sm:space-y-4 py-2 sm:py-4">
             <div className="text-center">
-              <p className="text-lg font-semibold mb-2">Благодарим ви за искреността!</p>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-base sm:text-lg font-bold mb-1">Благодарим!</p>
+              <p className="text-xs sm:text-sm text-muted-foreground">
                 Как бихте описали престоя си?
               </p>
             </div>
             <Textarea
               value={feedback}
               onChange={(e) => setFeedback(e.target.value)}
-              placeholder="Споделете вашето мнение..."
-              className="min-h-[100px]"
+              placeholder="Вашето мнение..."
+              className="min-h-[80px] sm:min-h-[100px] text-sm sm:text-base"
               disabled={submitting}
             />
-            <div className="flex gap-2">
+            <div className="flex gap-2 sm:gap-3">
               <Button
                 variant="outline"
                 onClick={() => {
@@ -157,16 +157,16 @@ const RatingModal: React.FC<RatingModalProps> = ({ open, onClose, tableId, googl
                   setRating(null);
                 }}
                 disabled={submitting}
-                className="flex-1"
+                className="flex-1 h-10 sm:h-11 text-sm font-semibold touch-manipulation"
               >
                 Назад
               </Button>
               <Button
                 onClick={handleSubmitFeedback}
                 disabled={submitting || !feedback.trim()}
-                className="flex-1 btn-gold"
+                className="flex-1 h-10 sm:h-11 btn-gold text-sm font-semibold touch-manipulation"
               >
-                {submitting ? 'Изпращане...' : 'Изпрати'}
+                {submitting ? '...' : 'Изпрати'}
               </Button>
             </div>
           </div>

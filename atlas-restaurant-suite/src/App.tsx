@@ -10,6 +10,7 @@ import Index from "./pages/Index";
 import CustomerMenu from "./pages/CustomerMenu";
 import ClientTables from "./pages/ClientTables";
 import TableOptions from "./pages/TableOptions";
+import KidsZoneAdmin from "./pages/KidsZoneAdmin";
 import KidsZoneDashboard from "./pages/KidsZoneDashboard";
 import NotFound from "./pages/NotFound";
 import { Loader2 } from "lucide-react";
@@ -64,6 +65,14 @@ const App = () => (
               />
               <Route 
                 path="/admin/kids-zone" 
+                element={
+                  <Suspense fallback={<PageLoader />}>
+                    <KidsZoneAdmin />
+                  </Suspense>
+                } 
+              />
+              <Route 
+                path="/animator" 
                 element={
                   <Suspense fallback={<PageLoader />}>
                     <KidsZoneDashboard />

@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useRestaurant } from '@/context/RestaurantContext';
 import { useToast } from '@/hooks/use-toast';
-import { Eye, EyeOff, Trash2, Edit2, Check, X } from 'lucide-react';
+import { Trash2, Edit2, Check, X } from 'lucide-react';
 import { MenuItem } from '@/context/RestaurantContext';
 
 interface DailyMenuEditorProps {
@@ -13,7 +13,7 @@ interface DailyMenuEditorProps {
 }
 
 const DailyMenuEditor: React.FC<DailyMenuEditorProps> = ({ open, onClose }) => {
-  const { menuItems, getDailyMenuItems, setDailyMenuItems, toggleDailyMenuItemVisibility } = useRestaurant();
+  const { menuItems, getDailyMenuItems, setDailyMenuItems } = useRestaurant();
   const { toast } = useToast();
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [dailyItems, setDailyItems] = useState<MenuItem[]>([]);
@@ -22,13 +22,7 @@ const DailyMenuEditor: React.FC<DailyMenuEditorProps> = ({ open, onClose }) => {
   const [editText, setEditText] = useState('');
 
   // Load daily menu items for selected date
-  useEffect(() => {
-    if (open) {
-      loadDailyMenu();
-    }
-  }, [open, selectedDate]);
-
-  const loadDailyMenu = async () => {
+  const loadDailyMenu = useCallback(async () => {
     setLoading(true);
     try {
       const items = await getDailyMenuItems(selectedDate);
@@ -43,7 +37,13 @@ const DailyMenuEditor: React.FC<DailyMenuEditorProps> = ({ open, onClose }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedDate, getDailyMenuItems, toast]);
+
+  useEffect(() => {
+    if (open) {
+      loadDailyMenu();
+    }
+  }, [open, loadDailyMenu]);
 
   const handleAddToDaily = async (item: MenuItem) => {
     try {
@@ -68,24 +68,6 @@ const DailyMenuEditor: React.FC<DailyMenuEditorProps> = ({ open, onClose }) => {
       toast({
         title: 'Грешка',
         description: 'Неуспешно добавяне на артикул',
-        variant: 'destructive',
-      });
-    }
-  };
-
-  const handleToggleVisibility = async (itemId: string, isVisible: boolean) => {
-    try {
-      await toggleDailyMenuItemVisibility(itemId, selectedDate, !isVisible);
-      await loadDailyMenu();
-      toast({
-        title: '✅ Обновено',
-        description: isVisible ? 'Артикулът е скрит' : 'Артикулът е показан',
-      });
-    } catch (error) {
-      console.error('Error toggling visibility:', error);
-      toast({
-        title: 'Грешка',
-        description: 'Неуспешно обновяване',
         variant: 'destructive',
       });
     }
@@ -250,15 +232,6 @@ const DailyMenuEditor: React.FC<DailyMenuEditorProps> = ({ open, onClose }) => {
                             title="Редактирай"
                           >
                             <Edit2 className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => handleToggleVisibility(item.id, true)}
-                            className="h-8 w-8 p-0"
-                            title="Покажи/Скрий"
-                          >
-                            <Eye className="h-4 w-4" />
                           </Button>
                           <Button
                             size="sm"

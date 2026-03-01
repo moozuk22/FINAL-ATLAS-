@@ -66,31 +66,19 @@ const TableCard: React.FC<TableCardProps> = ({
               onClick={onMarkAsPaid}
               aria-label={`Mark ${session.tableId} as paid`}
             >
-              <CheckCircle2 className="h-3 w-3 sm:mr-1" />
-              <span className="hidden sm:inline">Mark Paid</span>
-              <span className="sm:hidden">Paid</span>
+              <CheckCircle2 className="h-4 w-4 sm:mr-1" />
+              <span className="hidden sm:inline">Платено</span>
+              <span className="sm:hidden">✓</span>
             </Button>
           )}
-          {!hasActivity && onFreeTable && (
-          <Button
-            size="sm"
-            variant="outline"
-              className="text-xs h-8 sm:h-9 px-2 sm:px-3 touch-manipulation"
-              onClick={onFreeTable}
-              aria-label={`Free ${session.tableId}`}
-          >
-              <span className="hidden sm:inline">Free</span>
-              <span className="sm:hidden">Free</span>
-          </Button>
-        )}
         </div>
       </div>
 
       {/* Content */}
       <div className="p-3 sm:p-4 max-h-72 sm:max-h-80 overflow-y-auto scrollbar-premium">
         {session.requests.length === 0 ? (
-          <p className="text-center text-muted-foreground text-xs sm:text-sm py-4 sm:py-6">
-            No activity
+          <p className="text-center text-muted-foreground text-sm py-4 sm:py-6">
+            —
           </p>
         ) : (
           <div className="space-y-2 stagger-children">
@@ -113,7 +101,7 @@ const TableCard: React.FC<TableCardProps> = ({
       {hasActivity && (
         <div className="p-3 sm:p-4 border-t border-border bg-secondary/20">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-xs sm:text-sm text-muted-foreground">Running Total</span>
+            <span className="text-xs sm:text-sm font-semibold text-muted-foreground">Общо</span>
             <span className="font-display text-lg sm:text-xl font-bold text-primary truncate">
               {totalBill.toFixed(2)} EUR
             </span>

@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useSearchParams, useNavigate, useParams } from 'react-router-dom';
-import { Send, Bell, CreditCard, Lock, ArrowLeft, Loader2, Sparkles } from 'lucide-react';
+import { Send, Bell, CreditCard, Lock, ArrowLeft, Loader2, Sparkles, Clock, Home, ShoppingBag } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { useRestaurant } from '@/context/RestaurantContext';
@@ -11,6 +11,7 @@ import PaymentModal from '@/components/PaymentModal';
 import RatingModal from '@/components/RatingModal';
 import { trackQRScan } from '@/utils/analytics';
 import { triggerHapticFeedback, isOnline } from '@/utils/optimization';
+import { cn } from '@/lib/utils';
 
 const CustomerMenu: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -70,6 +71,9 @@ const CustomerMenu: React.FC = () => {
     submitOrder,
     callWaiter,
     callAnimator,
+    returnChildToTable,
+    takeChildBackToZone,
+    completeChildSession,
     requestBill,
     getCartTotal,
     getCartItemCount,
@@ -82,18 +86,192 @@ const CustomerMenu: React.FC = () => {
   const [loadingItems, setLoadingItems] = useState<Set<string>>(new Set());
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isOffline, setIsOffline] = useState(!isOnline());
+  const [currentTime, setCurrentTime] = useState(Date.now());
+  // Pending items - selected but not yet added to cart
+  const [pendingItems, setPendingItems] = useState<Array<{ id: string; name: string; price: number; quantity: number }>>([]);
   
   // Check if menu should be hidden (after 15:00) - DISABLED FOR NOW
   const isMenuHidden = false; // Toggle back: useMemo(() => { const hour = new Date().getHours(); return hour >= 15; }, []);
+
+  // Update current time every second for timer display
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
   
   const session = getTableSession(tableId);
   const cartTotal = getCartTotal(tableId);
   const cartItemCount = getCartItemCount(tableId);
   
-  // Calculate total bill from completed orders
+  // Get animator request status
+  const animatorRequest = useMemo(() => {
+    return session.requests.find(req => req.requestType === 'animator');
+  }, [session.requests]);
+
+  // Calculate timer for animator request
+  const childTimer = useMemo(() => {
+    if (!animatorRequest || !animatorRequest.timerStartedAt) return null;
+    
+    let totalSeconds = animatorRequest.totalTimeElapsed || 0;
+    
+    // If timer is running (not paused), add elapsed time since start
+    if (animatorRequest.childLocation === 'kids_zone' && !animatorRequest.timerPausedAt) {
+      const elapsedSinceStart = Math.floor((currentTime - animatorRequest.timerStartedAt) / 1000);
+      totalSeconds += elapsedSinceStart;
+    }
+    
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    
+    return {
+      hours,
+      minutes,
+      seconds,
+      totalSeconds,
+      cost: animatorRequest.hourlyRate ? Math.ceil((totalSeconds / 3600) * animatorRequest.hourlyRate * 100) / 100 : 0
+    };
+  }, [animatorRequest, currentTime]);
+  
+  // Calculate total bill from all confirmed orders + cart
+  // Always use latest prices from menuItems for cart items
   const totalBill = useMemo(() => {
-    return session.requests.reduce((sum, r) => sum + r.total, 0) + cartTotal;
-  }, [session.requests, cartTotal]);
+    // Calculate pending items total using latest prices from menuItems
+    const pendingTotal = pendingItems.reduce((sum, item) => {
+      const menuItem = menuItems.find(mi => mi.id === item.id);
+      const price = menuItem?.price || item.price; // Use latest price from menuItems
+      return sum + (price * item.quantity);
+    }, 0);
+    
+    // cartTotal already uses latest prices from menuItems (updated in RestaurantContext)
+    return session.requests.reduce((sum, r) => sum + r.total, 0) + cartTotal + pendingTotal;
+  }, [session.requests, cartTotal, pendingItems, menuItems]);
+
+  // Calculate total item count from confirmed orders only (not from cart)
+  const totalItemCount = useMemo(() => {
+    // Count items only from confirmed/pending orders (after order is submitted)
+    const orderItemsCount = session.requests
+      .filter(r => (r.status === 'confirmed' || r.status === 'pending') && r.requestType === 'order')
+      .reduce((count, r) => {
+        // Try to extract item count from details (e.g., "2x Пилешко филе, 1x Супа")
+        if (r.details) {
+          const matches = r.details.match(/(\d+)x/g);
+          if (matches) {
+            // Sum all quantities (e.g., "2x" + "1x" = 3)
+            const total = matches.reduce((sum, match) => {
+              const num = parseInt(match.replace('x', ''));
+              return sum + (isNaN(num) ? 0 : num);
+            }, 0);
+            return count + total;
+          }
+        }
+        // If no details or can't parse, count as 1 item per order
+        return count + 1;
+      }, 0);
+    
+    // Only count items from submitted orders, not from cart
+    return orderItemsCount;
+  }, [session.requests]);
+
+  // Combine all ordered items (from confirmed orders + cart)
+  // Always use latest prices from menuItems
+  const allOrderedItems = useMemo(() => {
+    const items: Array<{ id: string; name: string; price: number; quantity: number; fromOrder?: boolean }> = [];
+    
+    // Add items from confirmed/pending orders
+    session.requests
+      .filter(r => (r.status === 'confirmed' || r.status === 'pending') && r.requestType === 'order' && r.details)
+      .forEach(r => {
+        // Parse details like "2x Пилешко филе, 1x Супа"
+        const matches = r.details.match(/(\d+)x\s+([^,]+)/g);
+        if (matches) {
+          // Calculate total quantity and items for price distribution
+          let totalQuantity = 0;
+          const parsedItems: Array<{ name: string; quantity: number }> = [];
+          
+          matches.forEach(match => {
+            const quantityMatch = match.match(/(\d+)x/);
+            const nameMatch = match.match(/\d+x\s+(.+)/);
+            if (quantityMatch && nameMatch) {
+              const quantity = parseInt(quantityMatch[1]);
+              const name = nameMatch[1].trim();
+              totalQuantity += quantity;
+              parsedItems.push({ name, quantity });
+            }
+          });
+          
+          // Calculate price per item from order total
+          // If we can't find items by name, distribute total evenly
+          const orderTotal = r.total || 0;
+          const averagePricePerItem = totalQuantity > 0 ? orderTotal / totalQuantity : 0;
+          
+          parsedItems.forEach(({ name, quantity }) => {
+            // Try to find exact price from menuItems first (case-insensitive, partial match)
+            const menuItem = menuItems.find(mi => {
+              const miName = mi.name.trim().toLowerCase();
+              const searchName = name.trim().toLowerCase();
+              // Exact match or contains match
+              return miName === searchName || 
+                     miName.includes(searchName) || 
+                     searchName.includes(miName);
+            });
+            
+            // Use menuItem price if found, otherwise use calculated average
+            let itemPrice = menuItem?.price || 0;
+            
+            // If still 0 and we have order total, use average
+            if (itemPrice === 0 && averagePricePerItem > 0) {
+              itemPrice = averagePricePerItem;
+            }
+            
+            // Final fallback: if still 0, try to find any menu item with similar name
+            if (itemPrice === 0) {
+              const similarItem = menuItems.find(mi => 
+                mi.name.toLowerCase().includes(name.toLowerCase().substring(0, 5)) ||
+                name.toLowerCase().includes(mi.name.toLowerCase().substring(0, 5))
+              );
+              itemPrice = similarItem?.price || 0;
+            }
+            
+            items.push({
+              id: `order_${r.id}_${name.replace(/\s+/g, '_')}`,
+              name,
+              price: itemPrice, // Use latest price from menuItems or calculated
+              quantity,
+              fromOrder: true
+            });
+          });
+        }
+      });
+    
+    // Add items from cart - use latest prices from menuItems
+    session.cart.forEach(cartItem => {
+      const menuItem = menuItems.find(mi => mi.id === cartItem.id);
+      items.push({
+        id: cartItem.id,
+        name: cartItem.name,
+        price: menuItem?.price || cartItem.price, // Use latest price from menuItems
+        quantity: cartItem.quantity,
+        fromOrder: false
+      });
+    });
+    
+    // Add pending items - use latest prices from menuItems
+    pendingItems.forEach(pendingItem => {
+      const menuItem = menuItems.find(mi => mi.id === pendingItem.id);
+      items.push({
+        id: pendingItem.id,
+        name: pendingItem.name,
+        price: menuItem?.price || pendingItem.price, // Use latest price from menuItems
+        quantity: pendingItem.quantity,
+        fromOrder: false
+      });
+    });
+    
+    return items;
+  }, [session.requests, session.cart, pendingItems, menuItems]);
 
   // Group menu items by category - memoized with proper dependency
   const groupedItems = useMemo(() => {
@@ -125,10 +303,26 @@ const CustomerMenu: React.FC = () => {
       });
   }, [groupedItems]);
 
+  // Create a map of item quantities for faster lookup
+  const itemQuantities = useMemo(() => {
+    const quantities: Record<string, number> = {};
+    
+    // First, add quantities from pending items
+    pendingItems.forEach(item => {
+      quantities[item.id] = (quantities[item.id] || 0) + item.quantity;
+    });
+    
+    // Then, add quantities from cart (overwrites pending if exists)
+    session.cart.forEach(item => {
+      quantities[item.id] = (quantities[item.id] || 0) + item.quantity;
+    });
+    
+    return quantities;
+  }, [pendingItems, session.cart]);
+
   const getItemQuantity = useCallback((itemId: string) => {
-    const cartItem = session.cart.find(i => i.id === itemId);
-    return cartItem?.quantity || 0;
-  }, [session.cart]);
+    return itemQuantities[itemId] || 0;
+  }, [itemQuantities]);
 
   // Debounce helper
   const debounce = useCallback(<T extends (...args: unknown[]) => void>(func: T, wait: number) => {
@@ -139,70 +333,55 @@ const CustomerMenu: React.FC = () => {
     };
   }, []);
 
-  const handleAddItem = useCallback(async (item: typeof menuItems[0]) => {
-    if (session.isLocked || loadingItems.has(item.id)) return;
+  const handleAddItem = useCallback((item: typeof menuItems[0]) => {
+    if (session.isLocked) return;
     
     triggerHapticFeedback('light');
-    setLoadingItems(prev => new Set(prev).add(item.id));
     
-    try {
-      await addToCart(tableId, {
-      id: item.id,
-      name: item.name,
-      price: item.price,
-      quantity: 1,
-    });
-      // Only show toast on first add, not on subsequent adds
-      const currentQty = getItemQuantity(item.id);
-      if (currentQty === 1) {
-        toast({
-          title: '✅ Добавено',
-          description: `${item.name} е добавено в поръчката`,
-          duration: 2000,
-        });
+    // Add to pending items instead of cart
+    // Price will be fetched from menuItems when needed
+    setPendingItems(prev => {
+      const existing = prev.find(p => p.id === item.id);
+      if (existing) {
+        const updated = prev.map(p => 
+          p.id === item.id 
+            ? { ...p, quantity: p.quantity + 1 }
+            : p
+        );
+        return updated;
       }
-    } catch (error) {
-      console.error('Error adding item to cart:', error);
-      triggerHapticFeedback('heavy');
-      toast({
-        title: 'Грешка',
-        description: 'Неуспешно добавяне на артикул. Моля опитайте отново.',
-        variant: 'destructive',
-      });
-    } finally {
-      setLoadingItems(prev => {
-        const next = new Set(prev);
-        next.delete(item.id);
-        return next;
-      });
-    }
-  }, [session.isLocked, loadingItems, tableId, addToCart, getItemQuantity, toast]);
+      const newItems = [...prev, {
+        id: item.id,
+        name: item.name,
+        price: item.price, // Store current price, but will be refreshed from menuItems
+        quantity: 1
+      }];
+      return newItems;
+    });
+  }, [session.isLocked]);
 
-  const handleRemoveItem = useCallback(async (itemId: string) => {
-    if (session.isLocked || loadingItems.has(itemId)) return;
+  const handleRemoveItem = useCallback((itemId: string) => {
+    if (session.isLocked) return;
     
     triggerHapticFeedback('light');
-    setLoadingItems(prev => new Set(prev).add(itemId));
     
-    try {
-    const currentQty = getItemQuantity(itemId);
-      await updateCartQuantity(tableId, itemId, currentQty - 1);
-    } catch (error) {
-      console.error('Error removing item from cart:', error);
-      triggerHapticFeedback('heavy');
-      toast({
-        title: 'Грешка',
-        description: 'Неуспешно премахване на артикул',
-        variant: 'destructive',
-      });
-    } finally {
-      setLoadingItems(prev => {
-        const next = new Set(prev);
-        next.delete(itemId);
-        return next;
-      });
-    }
-  }, [session.isLocked, loadingItems, tableId, updateCartQuantity, getItemQuantity, toast]);
+    // Remove from pending items
+    setPendingItems(prev => {
+      const existing = prev.find(p => p.id === itemId);
+      if (existing) {
+        if (existing.quantity > 1) {
+          return prev.map(p => 
+            p.id === itemId 
+              ? { ...p, quantity: p.quantity - 1 }
+              : p
+          );
+        } else {
+          return prev.filter(p => p.id !== itemId);
+        }
+      }
+      return prev;
+    });
+  }, [session.isLocked]);
 
   const handleUpdateCartQuantity = useCallback(async (itemId: string, quantity: number) => {
     if (session.isLocked || loadingItems.has(itemId)) return;
@@ -280,10 +459,28 @@ const CustomerMenu: React.FC = () => {
   }, [session.isLocked, session.cart.length, tableId, clearCart, toast]);
 
   const handleSubmitOrder = useCallback(async () => {
-    if (session.isLocked || cartItemCount === 0 || isSubmitting) return;
+    if (session.isLocked || (pendingItems.length === 0 && cartItemCount === 0) || isSubmitting) return;
     
     setIsSubmitting(true);
     try {
+      // First, add all pending items to cart
+      if (pendingItems.length > 0) {
+        for (const item of pendingItems) {
+          // Add each item with its quantity
+          for (let i = 0; i < item.quantity; i++) {
+            await addToCart(tableId, {
+      id: item.id,
+      name: item.name,
+      price: item.price,
+      quantity: 1,
+    });
+          }
+        }
+        // Clear pending items
+        setPendingItems([]);
+      }
+      
+      // Then submit the order
       await submitOrder(tableId, source);
     toast({
       title: '✅ Поръчката е изпратена',
@@ -300,7 +497,7 @@ const CustomerMenu: React.FC = () => {
     } finally {
       setIsSubmitting(false);
     }
-  }, [session.isLocked, cartItemCount, isSubmitting, tableId, source, submitOrder, toast]);
+  }, [session.isLocked, pendingItems, cartItemCount, isSubmitting, tableId, source, addToCart, submitOrder, toast]);
 
   const handleCallWaiter = async () => {
     if (session.isLocked) return;
@@ -335,6 +532,63 @@ const CustomerMenu: React.FC = () => {
       toast({
         title: 'Грешка',
         description: 'Неуспешна заявка за аниматор',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleReturnChildToTable = async () => {
+    if (!animatorRequest) return;
+    
+    try {
+      await returnChildToTable(tableId, animatorRequest.id);
+      toast({
+        title: '✅ Детето е върнато на масата',
+        description: 'Таймерът е паузиран',
+      });
+    } catch (error) {
+      console.error('Error returning child to table:', error);
+      toast({
+        title: 'Грешка',
+        description: 'Неуспешно връщане на детето',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleTakeChildBackToZone = async () => {
+    if (!animatorRequest) return;
+    
+    try {
+      await takeChildBackToZone(tableId, animatorRequest.id);
+      toast({
+        title: '✅ Детето е взето обратно',
+        description: 'Таймерът продължава',
+      });
+    } catch (error) {
+      console.error('Error taking child back to zone:', error);
+      toast({
+        title: 'Грешка',
+        description: 'Неуспешно вземане на детето',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleCompleteChildSession = async () => {
+    if (!animatorRequest) return;
+    
+    try {
+      await completeChildSession(tableId, animatorRequest.id);
+      toast({
+        title: '✅ Сесията е завършена',
+        description: `Таксата за детския кът е добавена в сметката`,
+      });
+    } catch (error) {
+      console.error('Error completing child session:', error);
+      toast({
+        title: 'Грешка',
+        description: 'Неуспешно завършване на сесията',
         variant: 'destructive',
       });
     }
@@ -424,12 +678,98 @@ const CustomerMenu: React.FC = () => {
                 </p>
               </div>
             </div>
-            <div className="flex-shrink-0" onClick={() => setCartDrawerOpen(true)}>
-            <CartSummary itemCount={cartItemCount} total={cartTotal} />
-            </div>
+            
+            {/* Bill Summary - Small, top right corner */}
+            {!session.isLocked && totalBill > 0 && (
+              <div 
+                className="flex items-center gap-2 p-2 sm:p-2.5 bg-card/50 border border-border/50 rounded-lg cursor-pointer hover:bg-card/80 transition-all touch-manipulation flex-shrink-0 min-w-[140px] sm:min-w-[160px]"
+                onClick={() => setCartDrawerOpen(true)}
+              >
+                <div className="h-6 w-6 sm:h-7 sm:w-7 rounded bg-primary/10 flex items-center justify-center flex-shrink-0">
+                  <ShoppingBag className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-primary" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  {totalItemCount > 0 && (
+                    <p className="text-[10px] sm:text-xs text-muted-foreground leading-tight">
+                      {totalItemCount} {totalItemCount === 1 ? 'арт.' : 'арт.'}
+                    </p>
+                  )}
+                  <p className="font-bold text-foreground text-xs sm:text-sm truncate">
+                    {totalBill.toFixed(2)} EUR
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </header>
+
+      {/* Kids Zone Status */}
+      {animatorRequest && animatorRequest.status === 'confirmed' && (
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-3 sm:py-4">
+          <div className={cn(
+            "rounded-lg border p-4 transition-all",
+            animatorRequest.childLocation === 'kids_zone' 
+              ? "bg-yellow-500/10 border-yellow-500/30" 
+              : "bg-blue-500/10 border-blue-500/30"
+          )}>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-5 w-5 text-primary" />
+                <h3 className="font-bold text-base sm:text-lg">
+                  {animatorRequest.childLocation === 'kids_zone' ? '🎭 В къта' : '🏠 На масата'}
+                </h3>
+              </div>
+            </div>
+            
+            {childTimer && (
+              <div className="mb-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-xs font-semibold text-muted-foreground">Време:</span>
+                  </div>
+                  <span className="font-mono font-bold text-lg text-primary">
+                    {String(childTimer.hours).padStart(2, '0')}:
+                    {String(childTimer.minutes).padStart(2, '0')}:
+                    {String(childTimer.seconds).padStart(2, '0')}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-muted-foreground">Такса:</span>
+                  <span className="font-semibold text-primary">
+                    {childTimer.cost.toFixed(2)} EUR
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              {animatorRequest.childLocation === 'kids_zone' && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="flex-1 border-blue-500 text-blue-600 hover:bg-blue-50"
+                  onClick={handleReturnChildToTable}
+                >
+                  <Home className="h-5 w-5 mr-1.5" />
+                  На масата
+                </Button>
+              )}
+              {animatorRequest.childLocation === 'returning_to_table' && (
+                <Button
+                  size="sm"
+                  className="flex-1 btn-gold h-10"
+                  onClick={handleTakeChildBackToZone}
+                >
+                  <Sparkles className="h-5 w-5 mr-1.5" />
+                  В къта
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Menu */}
       <main className="max-w-3xl mx-auto px-4 sm:px-6 py-4 sm:py-6 md:py-8">
@@ -499,7 +839,7 @@ const CustomerMenu: React.FC = () => {
           <Button
             className="w-full btn-gold h-12 sm:h-14 text-sm font-light tracking-wider uppercase shadow-lg hover:shadow-xl transition-all touch-manipulation"
             onClick={handleSubmitOrder}
-            disabled={cartItemCount === 0 || isSubmitting || isMenuHidden}
+            disabled={(pendingItems.length === 0 && cartItemCount === 0) || isSubmitting || isMenuHidden}
           >
             {isSubmitting ? (
               <>
@@ -554,8 +894,14 @@ const CustomerMenu: React.FC = () => {
         open={cartDrawerOpen}
         onOpenChange={setCartDrawerOpen}
         cartItems={session.cart}
-        total={cartTotal}
-        itemCount={cartItemCount}
+        orderedItems={allOrderedItems.filter(item => item.fromOrder).map(item => ({
+          id: item.id,
+          name: item.name,
+          price: item.price,
+          quantity: item.quantity
+        }))}
+        total={totalBill}
+        itemCount={totalItemCount + cartItemCount}
         onUpdateQuantity={handleUpdateCartQuantity}
         onRemoveItem={handleRemoveFromCart}
         onClearCart={handleClearCart}
