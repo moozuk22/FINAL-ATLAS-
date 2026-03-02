@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useSearchParams, useNavigate, useParams } from 'react-router-dom';
-import { Send, Bell, CreditCard, Lock, ArrowLeft, Loader2, Sparkles, ShoppingBag } from 'lucide-react';
+import { Send, Bell, CreditCard, Lock, ArrowLeft, Loader2, Sparkles, ShoppingBag, GripVertical } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { useRestaurant, MenuItem } from '@/context/RestaurantContext';
@@ -17,6 +17,7 @@ import {
   DragOverlay,
   closestCenter,
   PointerSensor,
+  TouchSensor,
   useDroppable,
   useSensor,
   useSensors,
@@ -53,10 +54,33 @@ const SortableMenuItemRow: React.FC<{
       {...attributes}
       {...listeners}
       className={cn(
-        'cursor-grab active:cursor-grabbing',
-        isDragging && 'ring-2 ring-primary/20 rounded-lg'
+        'relative cursor-grab active:cursor-grabbing touch-manipulation',
+        isDragging && 'ring-2 ring-primary/30 rounded-2xl z-50 opacity-90',
+        // Prevent drag when interacting with buttons
+        '[&_button]:pointer-events-auto [&_button]:z-20'
       )}
+      onTouchStart={(e) => {
+        // Allow drag on touch devices - buttons will still work due to pointer-events-auto
+        const target = e.target as HTMLElement;
+        if (target.closest('button')) {
+          // Don't prevent default for buttons
+          return;
+        }
+      }}
     >
+      {/* Visual drag indicator for mobile */}
+      <div
+        className={cn(
+          'absolute left-1 top-1/2 -translate-y-1/2 z-10 p-1 rounded-md',
+          'bg-background/60 backdrop-blur-sm border border-border/30',
+          'opacity-60 sm:opacity-0 sm:group-hover:opacity-100',
+          'transition-opacity duration-200 pointer-events-none',
+          isDragging && 'opacity-100'
+        )}
+      >
+        <GripVertical className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground" />
+      </div>
+      
       <MenuItemCard
         id={item.id}
         name={item.name}
@@ -187,6 +211,14 @@ const CustomerMenu: React.FC = () => {
     useSensor(PointerSensor, {
       // Prevent accidental drags when tapping +/- or scrolling
       activationConstraint: { distance: 8 },
+    }),
+    useSensor(TouchSensor, {
+      // Optimized for mobile: lower activation distance, allow immediate drag
+      activationConstraint: { 
+        distance: 5, // Smaller distance for touch devices
+        delay: 0, // No delay for immediate response
+        tolerance: 5 // Tolerance for touch movement
+      },
     })
   );
   

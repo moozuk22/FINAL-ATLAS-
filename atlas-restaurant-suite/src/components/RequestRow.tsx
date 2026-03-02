@@ -3,6 +3,7 @@ import { Check, Clock, Loader2, ChefHat } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { TableRequest } from '@/context/RestaurantContext';
 import { cn } from '@/lib/utils';
+import { stripAllergenNumbersFromName } from '@/utils/menu';
 
 interface RequestRowProps {
   request: TableRequest;
@@ -69,9 +70,12 @@ const RequestRow: React.FC<RequestRowProps> = ({ request, onComplete, isCompleti
           {/* Details - only if exists and not redundant */}
           {request.details && request.details !== request.action && !request.details.includes('Заявка за') && (
             <div className="text-xs sm:text-sm text-foreground/70 mt-1 line-clamp-2">
-              {request.details.length > 40 
-                ? request.details.substring(0, 40) + '...' 
-                : request.details}
+              {(() => {
+                const cleanedDetails = stripAllergenNumbersFromName(request.details);
+                return cleanedDetails.length > 40 
+                  ? cleanedDetails.substring(0, 40) + '...' 
+                  : cleanedDetails;
+              })()}
             </div>
           )}
           
