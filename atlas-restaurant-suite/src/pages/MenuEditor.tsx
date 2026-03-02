@@ -74,51 +74,51 @@ const DraggableMenuItem: React.FC<{
       style={style}
       {...(!isBulkMode ? attributes : {})}
       {...(!isBulkMode ? listeners : {})}
-      className={`bg-card border rounded-lg p-4 flex items-center justify-between transition-all duration-200 ${
+      className={`bg-card border rounded-lg p-2.5 sm:p-3 md:p-4 flex items-center justify-between transition-all duration-200 ${
         isSelected ? 'border-primary bg-primary/5 shadow-sm' : 'border-border hover:border-primary/30 hover:shadow-sm'
       } ${isBulkMode ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing'} ${
         isDragging ? 'shadow-lg ring-2 ring-primary/20' : ''
       }`}
       onClick={isBulkMode && onToggleSelect ? () => onToggleSelect(item.id) : undefined}
     >
-      <div className="flex items-center gap-3 flex-1">
+      <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
         {isBulkMode && onToggleSelect && (
           <button
             onClick={(e) => {
               e.stopPropagation();
               onToggleSelect(item.id);
             }}
-            className="text-primary hover:text-primary/80"
+            className="text-primary hover:text-primary/80 flex-shrink-0"
           >
-            {isSelected ? <CheckSquare className="h-5 w-5" /> : <Square className="h-5 w-5" />}
+            {isSelected ? <CheckSquare className="h-4 w-4 sm:h-5 sm:w-5" /> : <Square className="h-4 w-4 sm:h-5 sm:w-5" />}
           </button>
         )}
-        <div className="flex-1">
-          <h3 className="font-medium text-foreground">{stripAllergenNumbersFromName(item.name)}</h3>
+        <div className="flex-1 min-w-0">
+          <h3 className="font-medium text-sm sm:text-base text-foreground truncate">{stripAllergenNumbersFromName(item.name)}</h3>
           {item.desc && (
-            <p className="text-sm text-muted-foreground mt-1">{item.desc}</p>
+            <p className="text-xs sm:text-sm text-muted-foreground mt-0.5 sm:mt-1 line-clamp-2">{item.desc}</p>
           )}
-          <p className="text-primary font-semibold mt-1">
+          <p className="text-xs sm:text-sm md:text-base text-primary font-semibold mt-0.5 sm:mt-1">
             {item.price.toFixed(2)} EUR
           </p>
         </div>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
         <Button
           size="icon"
           variant="ghost"
-          className="h-9 w-9"
+          className="h-8 w-8 sm:h-9 sm:w-9"
           onClick={() => onEdit(item)}
         >
-          <Edit2 className="h-4 w-4" />
+          <Edit2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
         </Button>
         <Button
           size="icon"
           variant="ghost"
-          className="h-9 w-9 text-destructive hover:text-destructive"
+          className="h-8 w-8 sm:h-9 sm:w-9 text-destructive hover:text-destructive"
           onClick={() => onDelete(item.id)}
         >
-          <Trash2 className="h-4 w-4" />
+          <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
         </Button>
       </div>
     </div>
@@ -194,18 +194,18 @@ const CategorySection: React.FC<{
         ) : (
           <>
             <h2 
-              className="text-xl font-semibold text-foreground flex items-center gap-3 bg-primary/5 px-4 py-2 rounded-lg border border-primary/10 cursor-pointer hover:bg-primary/10 transition-colors group"
+              className="text-base sm:text-lg md:text-xl font-semibold text-foreground flex items-center gap-2 sm:gap-3 bg-primary/5 px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 rounded-lg border border-primary/10 cursor-pointer hover:bg-primary/10 transition-colors group"
               onClick={() => !isUnassigned && setIsEditing(true)}
               title={!isUnassigned ? "Click to rename category" : undefined}
             >
-              <span className="text-2xl">{categoryEmoji}</span>
-              <span className="flex-1">{categoryName}</span>
-              <span className="text-sm font-normal text-muted-foreground">
+              <span className="text-lg sm:text-xl md:text-2xl flex-shrink-0">{categoryEmoji}</span>
+              <span className="flex-1 min-w-0 truncate">{categoryName}</span>
+              <span className="text-xs sm:text-sm font-normal text-muted-foreground flex-shrink-0">
                 ({items.length} {items.length === 1 ? 'item' : 'items'})
               </span>
-              {isOver && <span className="ml-2 text-sm text-primary font-medium animate-pulse">(Drop here)</span>}
+              {isOver && <span className="ml-1 sm:ml-2 text-xs sm:text-sm text-primary font-medium animate-pulse flex-shrink-0">(Drop here)</span>}
               {!isUnassigned && (
-                <Edit2 className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                <Edit2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
               )}
             </h2>
             {!isUnassigned && (
@@ -983,32 +983,32 @@ const MenuEditor: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
+      {/* Header - Mobile Optimized */}
       <header className="sticky top-0 z-40 bg-background border-b border-border">
-        <div className="max-w-6xl mx-auto px-6 py-5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
+        <div className="max-w-6xl mx-auto px-3 sm:px-4 md:px-6 py-3 sm:py-4 md:py-5">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="flex items-center gap-2 sm:gap-3 md:gap-4 min-w-0 flex-1">
               <Button
                 size="icon"
                 variant="ghost"
-                className="h-9 w-9 rounded-lg hover:bg-secondary"
+                className="h-8 w-8 sm:h-9 sm:w-9 rounded-lg hover:bg-secondary flex-shrink-0"
                 onClick={() => navigate('/admin')}
               >
-                <ArrowLeft className="h-4 w-4" />
+                <ArrowLeft className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
               </Button>
-              <div>
-                <h1 className="text-2xl font-semibold text-foreground">
+              <div className="min-w-0 flex-1">
+                <h1 className="text-lg sm:text-xl md:text-2xl font-semibold text-foreground truncate">
                   Menu Editor
                 </h1>
-                <p className="text-sm text-muted-foreground mt-1">
+                <p className="text-xs sm:text-sm text-muted-foreground mt-0.5 hidden sm:block">
                   Drag items to move between categories
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
               {isBulkMode ? (
                 <>
-                  <span className="text-sm text-muted-foreground">
+                  <span className="text-xs sm:text-sm text-muted-foreground hidden sm:inline">
                     {selectedItems.size} selected
                   </span>
                   <Button
@@ -1020,8 +1020,11 @@ const MenuEditor: React.FC = () => {
                       }
                     }}
                     disabled={selectedItems.size === 0}
+                    className="text-xs sm:text-sm h-8 sm:h-9 px-2 sm:px-3"
                   >
-                    Move Selected ({selectedItems.size})
+                    <span className="hidden sm:inline">Move Selected </span>
+                    <span className="sm:hidden">Move</span>
+                    {selectedItems.size > 0 && <span className="ml-1">({selectedItems.size})</span>}
                   </Button>
                   <Button
                     variant="outline"
@@ -1030,6 +1033,7 @@ const MenuEditor: React.FC = () => {
                       setIsBulkMode(false);
                       setSelectedItems(new Set());
                     }}
+                    className="text-xs sm:text-sm h-8 sm:h-9 px-2 sm:px-3"
                   >
                     Cancel
                   </Button>
@@ -1038,16 +1042,17 @@ const MenuEditor: React.FC = () => {
                 <Button
                   variant="outline"
                   onClick={() => setIsBulkMode(true)}
-                  className="gap-2"
+                  className="gap-1 sm:gap-2 text-xs sm:text-sm h-8 sm:h-9 px-2 sm:px-3"
                 >
-                  <CheckSquare className="h-4 w-4" />
-                  Bulk Select
+                  <CheckSquare className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                  <span className="hidden sm:inline">Bulk Select</span>
+                  <span className="sm:hidden">Select</span>
                 </Button>
               )}
               {showNewCategoryInput ? (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 sm:gap-2 w-full sm:w-auto">
                   <Input
-                    placeholder="New category name..."
+                    placeholder="New category..."
                     value={newCategoryName}
                     onChange={(e) => setNewCategoryName(e.target.value)}
                     onKeyDown={(e) => {
@@ -1058,10 +1063,10 @@ const MenuEditor: React.FC = () => {
                         setNewCategoryName('');
                       }
                     }}
-                    className="w-48"
+                    className="w-full sm:w-40 md:w-48 h-8 sm:h-9 text-xs sm:text-sm"
                     autoFocus
                   />
-                  <Button size="sm" onClick={handleCreateCategory}>
+                  <Button size="sm" onClick={handleCreateCategory} className="h-8 sm:h-9 px-2 sm:px-3 text-xs sm:text-sm">
                     Create
                   </Button>
                   <Button
@@ -1071,6 +1076,7 @@ const MenuEditor: React.FC = () => {
                       setShowNewCategoryInput(false);
                       setNewCategoryName('');
                     }}
+                    className="h-8 sm:h-9 px-2 sm:px-3 text-xs sm:text-sm"
                   >
                     Cancel
                   </Button>
@@ -1079,17 +1085,19 @@ const MenuEditor: React.FC = () => {
                 <Button
                   variant="outline"
                   onClick={() => setShowNewCategoryInput(true)}
-                  className="gap-2"
+                  className="gap-1 sm:gap-2 text-xs sm:text-sm h-8 sm:h-9 px-2 sm:px-3"
                 >
-                  <Plus className="h-4 w-4" />
-                  New Category
+                  <Plus className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                  <span className="hidden sm:inline">New Category</span>
+                  <span className="sm:hidden">Category</span>
                 </Button>
               )}
               <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
                 <DialogTrigger asChild>
-                  <Button onClick={handleAddNew} className="gap-2">
-                    <Plus className="h-4 w-4" />
-                    Add Item
+                  <Button onClick={handleAddNew} className="gap-1 sm:gap-2 text-xs sm:text-sm h-8 sm:h-9 px-2 sm:px-3">
+                    <Plus className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                    <span className="hidden sm:inline">Add Item</span>
+                    <span className="sm:hidden">Add</span>
                   </Button>
                 </DialogTrigger>
                 <DialogContent>
@@ -1157,12 +1165,12 @@ const MenuEditor: React.FC = () => {
         </div>
       </header>
 
-      {/* Menu Items */}
-      <main className="max-w-6xl mx-auto px-6 py-8">
+      {/* Menu Items - Mobile Optimized */}
+      <main className="max-w-6xl mx-auto px-3 sm:px-4 md:px-6 py-4 sm:py-6 md:py-8">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full max-w-md grid-cols-2 mb-6">
-            <TabsTrigger value="edit">Редактирай меню</TabsTrigger>
-            <TabsTrigger value="daily">Меню за деня</TabsTrigger>
+          <TabsList className="grid w-full max-w-md grid-cols-2 mb-4 sm:mb-6 h-9 sm:h-10">
+            <TabsTrigger value="edit" className="text-xs sm:text-sm">Редактирай меню</TabsTrigger>
+            <TabsTrigger value="daily" className="text-xs sm:text-sm">Меню за деня</TabsTrigger>
           </TabsList>
 
           <TabsContent value="edit" className="mt-0">
@@ -1180,7 +1188,7 @@ const MenuEditor: React.FC = () => {
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
           >
-            <div className="space-y-8 animate-in fade-in duration-300">
+            <div className="space-y-4 sm:space-y-6 md:space-y-8 animate-in fade-in duration-300">
               {/* Show Unassigned first if it exists */}
               {groupedItems['📦 Unassigned'] && (
                 <CategorySection
@@ -1242,21 +1250,21 @@ const MenuEditor: React.FC = () => {
 
           <TabsContent value="daily" className="mt-0">
             <div className="space-y-4">
-              <div className="flex items-center gap-4 mb-4">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4 mb-4">
                 <Input
                   type="date"
                   value={selectedDate}
                   onChange={(e) => setSelectedDate(e.target.value)}
-                  className="w-auto"
+                  className="w-full sm:w-auto text-xs sm:text-sm"
                 />
-                <Button onClick={loadDailyMenu} disabled={dailyMenuLoading} variant="outline">
+                <Button onClick={loadDailyMenu} disabled={dailyMenuLoading} variant="outline" className="w-full sm:w-auto text-xs sm:text-sm h-8 sm:h-9">
                   Зареди
                 </Button>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
                 {/* All Items Column */}
-                <div className="border rounded-lg p-4 overflow-y-auto max-h-[70vh]">
+                <div className="border rounded-lg p-3 sm:p-4 overflow-y-auto max-h-[60vh] sm:max-h-[70vh]">
                   <h3 className="font-semibold mb-3">Всички артикули</h3>
                   {dailyMenuLoading ? (
                     <p className="text-muted-foreground text-sm">Зареждане...</p>
@@ -1265,17 +1273,17 @@ const MenuEditor: React.FC = () => {
                       {availableItems.map(item => (
                         <div
                           key={item.id}
-                          className="flex items-center justify-between p-2 border rounded hover:bg-secondary/50"
+                          className="flex items-center justify-between p-2 sm:p-2.5 border rounded hover:bg-secondary/50 gap-2"
                         >
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium truncate">{stripAllergenNumbersFromName(item.name)}</p>
-                            <p className="text-xs text-muted-foreground">{item.price.toFixed(2)} EUR</p>
+                            <p className="text-xs sm:text-sm font-medium truncate">{stripAllergenNumbersFromName(item.name)}</p>
+                            <p className="text-[10px] sm:text-xs text-muted-foreground">{item.price.toFixed(2)} EUR</p>
                           </div>
                           <Button
                             size="sm"
                             variant="outline"
                             onClick={() => handleAddToDaily(item)}
-                            className="ml-2"
+                            className="ml-1 sm:ml-2 text-xs sm:text-sm h-7 sm:h-8 px-2 sm:px-3 flex-shrink-0"
                           >
                             Добави
                           </Button>
@@ -1291,8 +1299,8 @@ const MenuEditor: React.FC = () => {
                 </div>
 
                 {/* Daily Menu Items Column */}
-                <div className="border rounded-lg p-4 overflow-y-auto max-h-[70vh]">
-                  <h3 className="font-semibold mb-3">Меню за деня</h3>
+                <div className="border rounded-lg p-3 sm:p-4 overflow-y-auto max-h-[50vh] sm:max-h-[70vh]">
+                  <h3 className="font-semibold text-sm sm:text-base mb-2 sm:mb-3">Меню за деня</h3>
                   {dailyMenuLoading ? (
                     <p className="text-muted-foreground text-sm">Зареждане...</p>
                   ) : (
@@ -1300,24 +1308,24 @@ const MenuEditor: React.FC = () => {
                       {dailyItems.map(item => (
                         <div
                           key={item.id}
-                          className="flex items-center justify-between p-2 border rounded hover:bg-secondary/50"
+                          className="flex items-center justify-between p-2 sm:p-2.5 border rounded hover:bg-secondary/50 gap-2"
                         >
                           <div className="flex-1 min-w-0">
                             {editingDailyItem === item.id ? (
                               <Input
                                 value={editDailyText}
                                 onChange={(e) => setEditDailyText(e.target.value)}
-                                className="h-8 text-sm"
+                                className="h-7 sm:h-8 text-xs sm:text-sm"
                                 autoFocus
                               />
                             ) : (
                               <>
-                                <p className="text-sm font-medium truncate">{stripAllergenNumbersFromName(item.name)}</p>
-                                <p className="text-xs text-muted-foreground">{item.price.toFixed(2)} EUR</p>
+                                <p className="text-xs sm:text-sm font-medium truncate">{stripAllergenNumbersFromName(item.name)}</p>
+                                <p className="text-[10px] sm:text-xs text-muted-foreground">{item.price.toFixed(2)} EUR</p>
                               </>
                             )}
                           </div>
-                          <div className="flex items-center gap-1 ml-2">
+                          <div className="flex items-center gap-1 sm:gap-1.5 ml-1 sm:ml-2 flex-shrink-0">
                             {editingDailyItem === item.id ? (
                               <>
                                 <Button
@@ -1327,9 +1335,9 @@ const MenuEditor: React.FC = () => {
                                     setEditingDailyItem(null);
                                     setEditDailyText('');
                                   }}
-                                  className="h-8 w-8 p-0"
+                                  className="h-7 w-7 sm:h-8 sm:w-8 p-0"
                                 >
-                                  <X className="h-4 w-4" />
+                                  <X className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                                 </Button>
                               </>
                             ) : (
@@ -1341,19 +1349,19 @@ const MenuEditor: React.FC = () => {
                                     setEditingDailyItem(item.id);
                                     setEditDailyText(item.name);
                                   }}
-                                  className="h-8 w-8 p-0"
+                                  className="h-7 w-7 sm:h-8 sm:w-8 p-0"
                                   title="Редактирай"
                                 >
-                                  <Edit2 className="h-4 w-4" />
+                                  <Edit2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                                 </Button>
                                 <Button
                                   size="sm"
                                   variant="ghost"
                                   onClick={() => handleRemoveFromDaily(item.id)}
-                                  className="h-8 w-8 p-0 text-destructive"
+                                  className="h-7 w-7 sm:h-8 sm:w-8 p-0 text-destructive"
                                   title="Премахни"
                                 >
-                                  <Trash2 className="h-4 w-4" />
+                                  <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                                 </Button>
                               </>
                             )}
