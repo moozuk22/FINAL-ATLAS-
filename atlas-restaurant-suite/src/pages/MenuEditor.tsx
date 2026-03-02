@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Plus, Edit2, Trash2, Save, X, GripVertical, MoreVertical, Merge, CheckSquare, Square, Calendar } from 'lucide-react';
+import { ArrowLeft, Plus, Edit2, Trash2, Save, X, MoreVertical, Merge, CheckSquare, Square, Calendar } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useRestaurant, MenuItem } from '@/context/RestaurantContext';
 import { useToast } from '@/hooks/use-toast';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { stripAllergenNumbersFromName } from '@/utils/menu';
 import {
   Dialog,
   DialogContent,
@@ -71,6 +72,8 @@ const DraggableMenuItem: React.FC<{
     <div
       ref={setNodeRef}
       style={style}
+      {...(!isBulkMode ? attributes : {})}
+      {...(!isBulkMode ? listeners : {})}
       className={`bg-card border rounded-lg p-4 flex items-center justify-between transition-all duration-200 ${
         isSelected ? 'border-primary bg-primary/5 shadow-sm' : 'border-border hover:border-primary/30 hover:shadow-sm'
       } ${isBulkMode ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing'} ${
@@ -79,7 +82,7 @@ const DraggableMenuItem: React.FC<{
       onClick={isBulkMode && onToggleSelect ? () => onToggleSelect(item.id) : undefined}
     >
       <div className="flex items-center gap-3 flex-1">
-        {isBulkMode && onToggleSelect ? (
+        {isBulkMode && onToggleSelect && (
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -89,17 +92,9 @@ const DraggableMenuItem: React.FC<{
           >
             {isSelected ? <CheckSquare className="h-5 w-5" /> : <Square className="h-5 w-5" />}
           </button>
-        ) : (
-          <div
-            {...attributes}
-            {...listeners}
-            className="cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground"
-          >
-            <GripVertical className="h-5 w-5" />
-          </div>
         )}
         <div className="flex-1">
-          <h3 className="font-medium text-foreground">{item.name}</h3>
+          <h3 className="font-medium text-foreground">{stripAllergenNumbersFromName(item.name)}</h3>
           {item.desc && (
             <p className="text-sm text-muted-foreground mt-1">{item.desc}</p>
           )}
@@ -1273,7 +1268,7 @@ const MenuEditor: React.FC = () => {
                           className="flex items-center justify-between p-2 border rounded hover:bg-secondary/50"
                         >
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium truncate">{item.name}</p>
+                            <p className="text-sm font-medium truncate">{stripAllergenNumbersFromName(item.name)}</p>
                             <p className="text-xs text-muted-foreground">{item.price.toFixed(2)} EUR</p>
                           </div>
                           <Button
@@ -1317,7 +1312,7 @@ const MenuEditor: React.FC = () => {
                               />
                             ) : (
                               <>
-                                <p className="text-sm font-medium truncate">{item.name}</p>
+                                <p className="text-sm font-medium truncate">{stripAllergenNumbersFromName(item.name)}</p>
                                 <p className="text-xs text-muted-foreground">{item.price.toFixed(2)} EUR</p>
                               </>
                             )}

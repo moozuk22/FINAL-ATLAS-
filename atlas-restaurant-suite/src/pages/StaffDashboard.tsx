@@ -1,12 +1,11 @@
 import React, { useEffect, useRef, useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Utensils, Loader2, TrendingUp, Clock, Sparkles } from 'lucide-react';
+import { Utensils, Loader2, TrendingUp, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useRestaurant } from '@/context/RestaurantContext';
 import TableCard from '@/components/TableCard';
 import { useToast } from '@/hooks/use-toast';
 import RevenueReport from '@/components/RevenueReport';
-import PendingOrders from '@/components/PendingOrders';
 
 // Audio for alert notification
 const playAlertSound = () => {
@@ -37,7 +36,6 @@ const StaffDashboard: React.FC = () => {
   const prevPendingCountRef = useRef<number>(0);
   const [completingRequests, setCompletingRequests] = useState<Set<string>>(new Set());
   const [revenueReportOpen, setRevenueReportOpen] = useState(false);
-  const [pendingOrdersOpen, setPendingOrdersOpen] = useState(false);
   
   // Get all table IDs in order - memoized
   const tableIds = useMemo(() => 
@@ -193,17 +191,6 @@ const StaffDashboard: React.FC = () => {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setPendingOrdersOpen(true)}
-                  className="gap-1 text-xs h-9 sm:h-10 touch-manipulation"
-                  aria-label="Pending Orders"
-                >
-                  <Clock className="h-4 w-4" />
-                  <span className="hidden sm:inline">Чакащи</span>
-                  <span className="sm:hidden">⏱️</span>
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
                   onClick={() => navigate('/admin/kids-zone')}
                   className="gap-1 text-xs h-9 sm:h-10 touch-manipulation"
                   aria-label="Kids Zone Admin"
@@ -275,7 +262,6 @@ const StaffDashboard: React.FC = () => {
 
       {/* Modals */}
       <RevenueReport open={revenueReportOpen} onClose={() => setRevenueReportOpen(false)} />
-      <PendingOrders open={pendingOrdersOpen} onClose={() => setPendingOrdersOpen(false)} />
 
       {/* Legend */}
       <footer 

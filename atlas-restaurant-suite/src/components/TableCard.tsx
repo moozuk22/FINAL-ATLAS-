@@ -22,10 +22,19 @@ const TableCard: React.FC<TableCardProps> = ({
   completingRequests = new Set(),
 }) => {
   // Memoize calculations for performance
-  const { pendingRequests, completedRequests, hasPending, hasActivity, billPaid, totalBill, status } = useMemo(() => {
+  const { pendingRequests, completedRequests, hasPending, hasActionablePending, hasActivity, billPaid, totalBill, status } = useMemo(() => {
+    // Show both pending and confirmed requests in the list
     const pending = session.requests.filter(r => r.status === 'pending' || r.status === 'confirmed');
     const completed = session.requests.filter(r => r.status === 'completed');
     const hasPending = pending.length > 0;
+    
+    // Only count actual "pending" (not "confirmed") non-animator requests as actionable
+    // "confirmed" requests don't need action, they're already accepted
+    const actionablePending = session.requests.filter(r => 
+      r.status === 'pending' && r.requestType !== 'animator'
+    );
+    const hasActionablePending = actionablePending.length > 0;
+    
   const hasActivity = session.requests.length > 0;
   const billPaid = session.requests.some(
     r => r.action === '💳 BILL REQUEST' && r.status === 'completed'
@@ -33,11 +42,13 @@ const TableCard: React.FC<TableCardProps> = ({
   const totalBill = session.requests.reduce((sum, r) => sum + r.total, 0);
 
     let status: 'free' | 'occupied' | 'alert';
-    if (hasPending) status = 'alert';
+    // Only show "alert" if there are actual pending requests that need action
+    // If everything is confirmed/accepted, show "occupied"
+    if (hasActionablePending) status = 'alert';
     else if (hasActivity) status = 'occupied';
     else status = 'free';
     
-    return { pendingRequests: pending, completedRequests: completed, hasPending, hasActivity, billPaid, totalBill, status };
+    return { pendingRequests: pending, completedRequests: completed, hasPending, hasActionablePending, hasActivity, billPaid, totalBill, status };
   }, [session.requests]);
 
   return (
@@ -59,18 +70,18 @@ const TableCard: React.FC<TableCardProps> = ({
         </div>
         
         <div className="flex items-center gap-2 flex-shrink-0">
-          {hasPending && !session.isLocked && (
-            <Button
-              size="sm"
+          {hasActionablePending && !session.isLocked && (
+          <Button
+            size="sm"
               className="btn-gold text-xs h-8 sm:h-9 px-2 sm:px-3 touch-manipulation"
               onClick={onMarkAsPaid}
               aria-label={`Mark ${session.tableId} as paid`}
-            >
+          >
               <CheckCircle2 className="h-4 w-4 sm:mr-1" />
               <span className="hidden sm:inline">Платено</span>
               <span className="sm:hidden">✓</span>
-            </Button>
-          )}
+          </Button>
+        )}
         </div>
       </div>
 

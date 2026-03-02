@@ -372,15 +372,6 @@ const KidsZoneDashboard: React.FC = () => {
                                 {String(animatorStatus.timer.seconds).padStart(2, '0')}
                               </span>
                             </div>
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs font-semibold text-muted-foreground">Текуща такса:</span>
-                              <span className={cn(
-                                "font-semibold",
-                                animatorStatus.timer.isRunning ? "text-yellow-600" : "text-muted-foreground"
-                              )}>
-                                {animatorStatus.timer.cost.toFixed(2)} EUR
-                              </span>
-                            </div>
                             {!animatorStatus.timer.isRunning && animatorStatus.timer.totalSeconds > 0 && (
                               <div className="mt-2 pt-2 border-t border-border/50 text-xs text-muted-foreground">
                                 Таймерът е на пауза. Детето е на масата.

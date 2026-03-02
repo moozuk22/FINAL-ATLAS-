@@ -371,7 +371,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           requests,
           isVip: table.is_vip,
         };
-      });
+  });
 
       setTables(sessions);
       setLoading(false);

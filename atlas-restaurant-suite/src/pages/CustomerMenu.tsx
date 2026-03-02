@@ -1,9 +1,9 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useSearchParams, useNavigate, useParams } from 'react-router-dom';
-import { Send, Bell, CreditCard, Lock, ArrowLeft, Loader2, Sparkles, Clock, Home, ShoppingBag } from 'lucide-react';
+import { Send, Bell, CreditCard, Lock, ArrowLeft, Loader2, Sparkles, ShoppingBag } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
-import { useRestaurant } from '@/context/RestaurantContext';
+import { useRestaurant, MenuItem } from '@/context/RestaurantContext';
 import MenuItemCard from '@/components/MenuItemCard';
 import CartSummary from '@/components/CartSummary';
 import CartDrawer from '@/components/CartDrawer';
@@ -63,6 +63,7 @@ const CustomerMenu: React.FC = () => {
   
   const {
     menuItems,
+    getDailyMenuItems,
     getTableSession,
     addToCart,
     updateCartQuantity,
@@ -71,12 +72,7 @@ const CustomerMenu: React.FC = () => {
     submitOrder,
     callWaiter,
     callAnimator,
-    returnChildToTable,
-    takeChildBackToZone,
-    completeChildSession,
     requestBill,
-    getCartTotal,
-    getCartItemCount,
     loading,
   } = useRestaurant();
 
@@ -89,6 +85,8 @@ const CustomerMenu: React.FC = () => {
   const [currentTime, setCurrentTime] = useState(Date.now());
   // Pending items - selected but not yet added to cart
   const [pendingItems, setPendingItems] = useState<Array<{ id: string; name: string; price: number; quantity: number }>>([]);
+  const [dailyMenuItems, setDailyMenuItems] = useState<MenuItem[]>([]);
+  const [dailyMenuLoading, setDailyMenuLoading] = useState(false);
   
   // Check if menu should be hidden (after 15:00) - DISABLED FOR NOW
   const isMenuHidden = false; // Toggle back: useMemo(() => { const hour = new Date().getHours(); return hour >= 15; }, []);
@@ -100,10 +98,23 @@ const CustomerMenu: React.FC = () => {
     }, 1000);
     return () => clearInterval(interval);
   }, []);
+
+  // Load daily menu (today, visible only). Customer menu renders ONLY the daily menu.
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      setDailyMenuLoading(true);
+      const items = await getDailyMenuItems();
+      if (!mounted) return;
+      setDailyMenuItems(items);
+      setDailyMenuLoading(false);
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [getDailyMenuItems]);
   
   const session = getTableSession(tableId);
-  const cartTotal = getCartTotal(tableId);
-  const cartItemCount = getCartItemCount(tableId);
   
   // Get animator request status
   const animatorRequest = useMemo(() => {
@@ -135,8 +146,8 @@ const CustomerMenu: React.FC = () => {
     };
   }, [animatorRequest, currentTime]);
   
-  // Calculate total bill from all confirmed orders + cart
-  // Always use latest prices from menuItems for cart items
+  // Calculate total bill from all confirmed orders + pending items (not cart until order is submitted)
+  // Always use latest prices from menuItems for pending items
   const totalBill = useMemo(() => {
     // Calculate pending items total using latest prices from menuItems
     const pendingTotal = pendingItems.reduce((sum, item) => {
@@ -145,13 +156,23 @@ const CustomerMenu: React.FC = () => {
       return sum + (price * item.quantity);
     }, 0);
     
-    // cartTotal already uses latest prices from menuItems (updated in RestaurantContext)
-    return session.requests.reduce((sum, r) => sum + r.total, 0) + cartTotal + pendingTotal;
-  }, [session.requests, cartTotal, pendingItems, menuItems]);
+    // Only include confirmed orders, not cart items (cart is only used after order submission)
+    const confirmedOrdersTotal = session.requests.reduce((sum, r) => sum + r.total, 0);
+    return confirmedOrdersTotal + pendingTotal;
+  }, [session.requests, pendingItems, menuItems]);
+  
+  // Calculate pending items total separately for display
+  const pendingItemsTotal = useMemo(() => {
+    return pendingItems.reduce((sum, item) => {
+      const menuItem = menuItems.find(mi => mi.id === item.id);
+      const price = menuItem?.price || item.price;
+      return sum + (price * item.quantity);
+    }, 0);
+  }, [pendingItems, menuItems]);
 
-  // Calculate total item count from confirmed orders only (not from cart)
+  // Calculate total item count from confirmed orders + pending items (not from cart)
   const totalItemCount = useMemo(() => {
-    // Count items only from confirmed/pending orders (after order is submitted)
+    // Count items from confirmed/pending orders (after order is submitted)
     const orderItemsCount = session.requests
       .filter(r => (r.status === 'confirmed' || r.status === 'pending') && r.requestType === 'order')
       .reduce((count, r) => {
@@ -171,9 +192,11 @@ const CustomerMenu: React.FC = () => {
         return count + 1;
       }, 0);
     
-    // Only count items from submitted orders, not from cart
-    return orderItemsCount;
-  }, [session.requests]);
+    // Add pending items count (items selected but not yet submitted)
+    const pendingItemsCount = pendingItems.reduce((sum, item) => sum + item.quantity, 0);
+    
+    return orderItemsCount + pendingItemsCount;
+  }, [session.requests, pendingItems]);
 
   // Combine all ordered items (from confirmed orders + cart)
   // Always use latest prices from menuItems
@@ -246,19 +269,8 @@ const CustomerMenu: React.FC = () => {
         }
       });
     
-    // Add items from cart - use latest prices from menuItems
-    session.cart.forEach(cartItem => {
-      const menuItem = menuItems.find(mi => mi.id === cartItem.id);
-      items.push({
-        id: cartItem.id,
-        name: cartItem.name,
-        price: menuItem?.price || cartItem.price, // Use latest price from menuItems
-        quantity: cartItem.quantity,
-        fromOrder: false
-      });
-    });
-    
     // Add pending items - use latest prices from menuItems
+    // Note: cart items are not included here - items are only added to cart when order is submitted
     pendingItems.forEach(pendingItem => {
       const menuItem = menuItems.find(mi => mi.id === pendingItem.id);
       items.push({
@@ -271,11 +283,11 @@ const CustomerMenu: React.FC = () => {
     });
     
     return items;
-  }, [session.requests, session.cart, pendingItems, menuItems]);
+  }, [session.requests, pendingItems, menuItems]);
 
   // Group menu items by category - memoized with proper dependency
   const groupedItems = useMemo(() => {
-    return menuItems.reduce((acc, item) => {
+    return dailyMenuItems.reduce((acc, item) => {
       // Handle empty or undefined categories
       const category = item.cat && item.cat.trim() 
         ? item.cat.trim() 
@@ -286,8 +298,8 @@ const CustomerMenu: React.FC = () => {
       }
       acc[category].push(item);
       return acc;
-    }, {} as Record<string, typeof menuItems>);
-  }, [menuItems]);
+    }, {} as Record<string, MenuItem[]>);
+  }, [dailyMenuItems]);
 
   // Filter out empty categories and sort them
   const sortedCategories = useMemo(() => {
@@ -304,21 +316,17 @@ const CustomerMenu: React.FC = () => {
   }, [groupedItems]);
 
   // Create a map of item quantities for faster lookup
+  // Only use pending items (cart items are only added when order is submitted)
   const itemQuantities = useMemo(() => {
     const quantities: Record<string, number> = {};
     
-    // First, add quantities from pending items
+    // Only add quantities from pending items
     pendingItems.forEach(item => {
       quantities[item.id] = (quantities[item.id] || 0) + item.quantity;
     });
     
-    // Then, add quantities from cart (overwrites pending if exists)
-    session.cart.forEach(item => {
-      quantities[item.id] = (quantities[item.id] || 0) + item.quantity;
-    });
-    
     return quantities;
-  }, [pendingItems, session.cart]);
+  }, [pendingItems]);
 
   const getItemQuantity = useCallback((itemId: string) => {
     return itemQuantities[itemId] || 0;
@@ -333,7 +341,7 @@ const CustomerMenu: React.FC = () => {
     };
   }, []);
 
-  const handleAddItem = useCallback((item: typeof menuItems[0]) => {
+  const handleAddItem = useCallback((item: MenuItem) => {
     if (session.isLocked) return;
     
     triggerHapticFeedback('light');
@@ -459,7 +467,7 @@ const CustomerMenu: React.FC = () => {
   }, [session.isLocked, session.cart.length, tableId, clearCart, toast]);
 
   const handleSubmitOrder = useCallback(async () => {
-    if (session.isLocked || (pendingItems.length === 0 && cartItemCount === 0) || isSubmitting) return;
+    if (session.isLocked || pendingItems.length === 0 || isSubmitting) return;
     
     setIsSubmitting(true);
     try {
@@ -497,7 +505,7 @@ const CustomerMenu: React.FC = () => {
     } finally {
       setIsSubmitting(false);
     }
-  }, [session.isLocked, pendingItems, cartItemCount, isSubmitting, tableId, source, addToCart, submitOrder, toast]);
+  }, [session.isLocked, pendingItems, isSubmitting, tableId, source, addToCart, submitOrder, toast]);
 
   const handleCallWaiter = async () => {
     if (session.isLocked) return;
@@ -532,63 +540,6 @@ const CustomerMenu: React.FC = () => {
       toast({
         title: 'Грешка',
         description: 'Неуспешна заявка за аниматор',
-        variant: 'destructive',
-      });
-    }
-  };
-
-  const handleReturnChildToTable = async () => {
-    if (!animatorRequest) return;
-    
-    try {
-      await returnChildToTable(tableId, animatorRequest.id);
-      toast({
-        title: '✅ Детето е върнато на масата',
-        description: 'Таймерът е паузиран',
-      });
-    } catch (error) {
-      console.error('Error returning child to table:', error);
-      toast({
-        title: 'Грешка',
-        description: 'Неуспешно връщане на детето',
-        variant: 'destructive',
-      });
-    }
-  };
-
-  const handleTakeChildBackToZone = async () => {
-    if (!animatorRequest) return;
-    
-    try {
-      await takeChildBackToZone(tableId, animatorRequest.id);
-      toast({
-        title: '✅ Детето е взето обратно',
-        description: 'Таймерът продължава',
-      });
-    } catch (error) {
-      console.error('Error taking child back to zone:', error);
-      toast({
-        title: 'Грешка',
-        description: 'Неуспешно вземане на детето',
-        variant: 'destructive',
-      });
-    }
-  };
-
-  const handleCompleteChildSession = async () => {
-    if (!animatorRequest) return;
-    
-    try {
-      await completeChildSession(tableId, animatorRequest.id);
-      toast({
-        title: '✅ Сесията е завършена',
-        description: `Таксата за детския кът е добавена в сметката`,
-      });
-    } catch (error) {
-      console.error('Error completing child session:', error);
-      toast({
-        title: 'Грешка',
-        description: 'Неуспешно завършване на сесията',
         variant: 'destructive',
       });
     }
@@ -680,7 +631,8 @@ const CustomerMenu: React.FC = () => {
             </div>
             
             {/* Bill Summary - Small, top right corner */}
-            {!session.isLocked && totalBill > 0 && (
+            {/* Only show when there are pending items to submit OR confirmed orders */}
+            {!session.isLocked && (pendingItems.length > 0 || totalBill > 0) && (
               <div 
                 className="flex items-center gap-2 p-2 sm:p-2.5 bg-card/50 border border-border/50 rounded-lg cursor-pointer hover:bg-card/80 transition-all touch-manipulation flex-shrink-0 min-w-[140px] sm:min-w-[160px]"
                 onClick={() => setCartDrawerOpen(true)}
@@ -713,6 +665,22 @@ const CustomerMenu: React.FC = () => {
             </p>
             <p className="text-sm text-muted-foreground mt-2">
               Моля, използвайте другите опции
+            </p>
+          </div>
+        ) : dailyMenuLoading ? (
+          <div className="text-center py-12">
+            <div className="flex items-center justify-center gap-2 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>Зареждане на меню за деня...</span>
+            </div>
+          </div>
+        ) : dailyMenuItems.length === 0 ? (
+          <div className="text-center py-12">
+            <p className="text-lg text-muted-foreground">
+              Няма меню за деня
+            </p>
+            <p className="text-sm text-muted-foreground mt-2">
+              Моля, обърнете се към персонала.
             </p>
           </div>
         ) : (
@@ -772,7 +740,7 @@ const CustomerMenu: React.FC = () => {
           <Button
             className="w-full btn-gold h-12 sm:h-14 text-sm font-light tracking-wider uppercase shadow-lg hover:shadow-xl transition-all touch-manipulation"
             onClick={handleSubmitOrder}
-            disabled={(pendingItems.length === 0 && cartItemCount === 0) || isSubmitting || isMenuHidden}
+            disabled={pendingItems.length === 0 || isSubmitting || isMenuHidden}
           >
             {isSubmitting ? (
               <>
@@ -826,7 +794,12 @@ const CustomerMenu: React.FC = () => {
       <CartDrawer
         open={cartDrawerOpen}
         onOpenChange={setCartDrawerOpen}
-        cartItems={session.cart}
+        cartItems={pendingItems.map(item => ({
+          id: item.id,
+          name: item.name,
+          price: item.price,
+          quantity: item.quantity
+        }))}
         orderedItems={allOrderedItems.filter(item => item.fromOrder).map(item => ({
           id: item.id,
           name: item.name,
@@ -834,12 +807,42 @@ const CustomerMenu: React.FC = () => {
           quantity: item.quantity
         }))}
         total={totalBill}
-        itemCount={totalItemCount + cartItemCount}
-        onUpdateQuantity={handleUpdateCartQuantity}
-        onRemoveItem={handleRemoveFromCart}
-        onClearCart={handleClearCart}
+        itemCount={totalItemCount}
+        onUpdateQuantity={(itemId, quantity) => {
+          // Update pending items quantity
+          setPendingItems(prev => {
+            const existing = prev.find(p => p.id === itemId);
+            if (existing) {
+              if (quantity <= 0) {
+                return prev.filter(p => p.id !== itemId);
+              }
+              return prev.map(p => 
+                p.id === itemId ? { ...p, quantity } : p
+              );
+            }
+            return prev;
+          });
+        }}
+        onRemoveItem={(itemId) => {
+          // Remove from pending items
+          setPendingItems(prev => prev.filter(p => p.id !== itemId));
+        }}
+        onClearCart={() => {
+          // Clear pending items
+          setPendingItems([]);
+        }}
+        onReorderItems={(newOrder) => {
+          // Update pending items order
+          setPendingItems(newOrder);
+        }}
+        onReorderOrderedItems={(newOrder) => {
+          // Note: Ordered items are read-only from confirmed orders
+          // This callback is available but ordered items order doesn't affect functionality
+          // The order is preserved for display purposes only
+        }}
         isLoading={loadingItems.size > 0}
         disabled={session.isLocked}
+        kidsZoneFee={childTimer?.cost || 0}
       />
 
       {/* Payment Modal */}

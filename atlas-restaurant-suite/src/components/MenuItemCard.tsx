@@ -1,6 +1,7 @@
 import React, { memo } from 'react';
 import { Minus, Plus, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { stripAllergenNumbersFromName } from '@/utils/menu';
 
 interface MenuItemCardProps {
   id: string;
@@ -26,6 +27,7 @@ const MenuItemCard: React.FC<MenuItemCardProps> = ({
   disabled = false,
   isLoading = false,
 }) => {
+  const displayName = stripAllergenNumbersFromName(name);
   // Haptic feedback for mobile
   const triggerHaptic = () => {
     if ('vibrate' in navigator) {
@@ -49,7 +51,7 @@ const MenuItemCard: React.FC<MenuItemCardProps> = ({
         <div className="flex justify-between items-start gap-4">
           <div className="flex-1">
             <h3 className="font-display text-lg font-semibold text-foreground">
-              {name}
+              {displayName}
             </h3>
             {description && (
               <p className="text-sm text-muted-foreground mt-1">{description}</p>
@@ -68,7 +70,7 @@ const MenuItemCard: React.FC<MenuItemCardProps> = ({
                   className="h-11 w-11 sm:h-12 sm:w-12 rounded-full border-primary/30 hover:bg-primary/10 active:scale-95 transition-transform touch-manipulation"
                   onClick={handleRemove}
                   disabled={disabled || isLoading}
-                  aria-label={`Remove ${name}`}
+                  aria-label={`Remove ${displayName}`}
                 >
                   {isLoading ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -86,7 +88,7 @@ const MenuItemCard: React.FC<MenuItemCardProps> = ({
               className="h-11 w-11 sm:h-12 sm:w-12 rounded-full btn-gold active:scale-95 transition-transform touch-manipulation"
               onClick={handleAdd}
               disabled={disabled || isLoading}
-              aria-label={`Add ${name}`}
+              aria-label={`Add ${displayName}`}
             >
               {isLoading ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -107,7 +109,7 @@ const MenuItemCard: React.FC<MenuItemCardProps> = ({
         <div className="flex-1 min-w-0">
           <div className="flex items-start gap-2 sm:gap-3 mb-1">
             <h3 className="font-display text-base sm:text-lg font-medium text-foreground tracking-tight flex-1">
-              {name}
+              {displayName}
             </h3>
             <div className="flex items-baseline gap-1 sm:gap-1.5 flex-shrink-0 ml-auto">
               <span className="text-base sm:text-lg font-semibold text-foreground">
@@ -133,7 +135,7 @@ const MenuItemCard: React.FC<MenuItemCardProps> = ({
                 className="h-11 w-11 sm:h-12 sm:w-12 rounded-full border border-border/30 hover:bg-secondary hover:border-primary/40 active:scale-95 transition-transform touch-manipulation"
                 onClick={handleRemove}
                 disabled={disabled || isLoading}
-                aria-label={`Remove ${name}`}
+                aria-label={`Remove ${displayName}`}
               >
                 {isLoading ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -154,7 +156,7 @@ const MenuItemCard: React.FC<MenuItemCardProps> = ({
             className="h-11 w-11 sm:h-12 sm:w-12 rounded-full border border-primary/30 hover:bg-primary/10 hover:border-primary/50 active:scale-95 transition-transform touch-manipulation"
             onClick={handleAdd}
             disabled={disabled || isLoading}
-            aria-label={`Add ${name}`}
+            aria-label={`Add ${displayName}`}
           >
             {isLoading ? (
               <Loader2 className="h-4 w-4 animate-spin text-primary" />

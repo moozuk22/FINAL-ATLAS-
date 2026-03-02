@@ -9,7 +9,7 @@ const KidsZoneAdmin: React.FC = () => {
   const navigate = useNavigate();
   const { tables, loading } = useRestaurant();
   const [currentTime, setCurrentTime] = useState(Date.now());
-
+  
   // Get all table IDs
   const tableIds = useMemo(() => 
     Array.from({ length: 10 }, (_, i) => 
@@ -70,7 +70,7 @@ const KidsZoneAdmin: React.FC = () => {
   const getTableAnimatorStatus = useCallback((tableId: string) => {
     const table = tables[tableId];
     if (!table) return null;
-    
+
     const animatorRequest = table.requests.find(
       req => req.requestType === 'animator' || req.requestType === 'kids_zone'
     );
@@ -95,22 +95,22 @@ const KidsZoneAdmin: React.FC = () => {
         <div className="container mx-auto px-4 sm:px-6 py-3 sm:py-4">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
             <div className="flex items-center gap-3 sm:gap-4 w-full sm:w-auto">
-              <Button
-                variant="ghost"
+            <Button
+              variant="ghost"
                 size="sm"
                 onClick={() => navigate('/admin')}
                 className="h-9 w-9 p-0 flex-shrink-0"
                 aria-label="Назад"
-              >
+            >
                 <ArrowLeft className="h-5 w-5" />
-              </Button>
+            </Button>
               <div className="min-w-0 flex-1 sm:flex-none">
                 <h1 className="font-display text-xl sm:text-2xl font-bold text-gold tracking-wide truncate">
                   🎭 Kids Zone
-                </h1>
+              </h1>
                 <p className="text-xs sm:text-sm text-muted-foreground mt-0.5 truncate">
                   Admin View
-                </p>
+              </p>
               </div>
             </div>
           </div>
@@ -174,9 +174,6 @@ const KidsZoneAdmin: React.FC = () => {
                         <h3 className="font-display text-base sm:text-lg font-semibold truncate">
                           {tableId.replace('_', ' ')}
                         </h3>
-                        {isPending && (
-                          <div className="h-3 w-3 rounded-full bg-destructive animate-pulse flex-shrink-0" />
-                        )}
                       </div>
                     </div>
 
@@ -213,8 +210,8 @@ const KidsZoneAdmin: React.FC = () => {
                                   )} />
                                   <span className="text-xs text-muted-foreground">
                                     {animatorStatus.timer.isRunning ? 'Активен' : 'Паузиран'}
-                                  </span>
-                                </div>
+                    </span>
+                  </div>
                                 <span className={cn(
                                   "font-mono text-sm font-bold",
                                   animatorStatus.timer.isRunning ? "text-yellow-600" : "text-muted-foreground"
@@ -222,27 +219,18 @@ const KidsZoneAdmin: React.FC = () => {
                                   {String(animatorStatus.timer.hours).padStart(2, '0')}:
                                   {String(animatorStatus.timer.minutes).padStart(2, '0')}:
                                   {String(animatorStatus.timer.seconds).padStart(2, '0')}
-                                </span>
-                              </div>
-                              <div className="flex items-center justify-between">
-                                <span className="text-xs text-muted-foreground">Такса:</span>
-                                <span className={cn(
-                                  "text-sm font-bold",
-                                  animatorStatus.timer.isRunning ? "text-yellow-600" : "text-muted-foreground"
-                                )}>
-                                  {animatorStatus.timer.cost.toFixed(2)} EUR
-                                </span>
-                              </div>
-                            </div>
-                          )}
+                    </span>
+                  </div>
+                </div>
+              )}
                         </>
                       ) : (
                         <div className="text-sm text-muted-foreground text-center py-2">
                           Няма активна сесия
-                        </div>
+            </div>
                       )}
                     </div>
-                  </div>
+            </div>
                 );
               })}
             </div>

@@ -84,7 +84,12 @@ const RequestRow: React.FC<RequestRowProps> = ({ request, onComplete, isCompleti
         </div>
         
         {/* Button - Minimalist: Round, icon only */}
-        {(isPending || isConfirmed) ? (
+        {/* For animator requests, admin can only view (not accept) - they're handled in KidsZoneDashboard */}
+        {request.requestType === 'animator' && isPending ? (
+          <div className="h-8 w-8 sm:h-9 sm:w-9 rounded-full bg-muted/30 flex items-center justify-center flex-shrink-0">
+            <Clock className="h-4 w-4 text-muted-foreground" />
+          </div>
+        ) : (isPending || isConfirmed) ? (
           <Button
             size="sm"
             className={cn(

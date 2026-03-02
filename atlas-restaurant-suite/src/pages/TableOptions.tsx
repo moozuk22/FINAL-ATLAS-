@@ -1,11 +1,15 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Utensils, Sparkles, ArrowRight } from 'lucide-react';
+import { Utensils, ArrowRight, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useRestaurant } from '@/context/RestaurantContext';
 
 const TableOptions: React.FC = () => {
   const { tableNumber } = useParams();
   const navigate = useNavigate();
+  const { getDailyMenuItems } = useRestaurant();
+  const [checkingDailyMenu, setCheckingDailyMenu] = useState(true);
+  const [hasDailyMenu, setHasDailyMenu] = useState(false);
 
   // Convert /t/1 to Table_01 format
   const getTableId = () => {
@@ -19,6 +23,20 @@ const TableOptions: React.FC = () => {
   };
 
   const tableId = getTableId();
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      setCheckingDailyMenu(true);
+      const items = await getDailyMenuItems(); // today + is_visible=true
+      if (!mounted) return;
+      setHasDailyMenu(items.length > 0);
+      setCheckingDailyMenu(false);
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [getDailyMenuItems]);
 
   return (
     <div className="min-h-screen flex items-center justify-center p-6 bg-background">
@@ -35,25 +53,46 @@ const TableOptions: React.FC = () => {
 
         {/* Options Cards */}
         <div className="space-y-4">
-          {/* Menu Option */}
-          <Button
-            onClick={() => navigate(`/menu?table=${tableId}`)}
-            className="w-full card-premium rounded-xl p-6 hover:border-primary transition-all group h-auto"
-            variant="ghost"
-          >
-            <div className="flex items-center justify-between w-full">
+          {/* Menu Option (only if Daily Menu exists) */}
+          {checkingDailyMenu ? (
+            <div className="w-full card-premium rounded-xl p-6 border border-border/50 opacity-80">
+              <div className="flex items-center gap-3 text-muted-foreground">
+                <Loader2 className="h-5 w-5 animate-spin" />
+                <span>Проверка на меню за деня...</span>
+              </div>
+            </div>
+          ) : hasDailyMenu ? (
+            <Button
+              onClick={() => navigate(`/menu?table=${tableId}`)}
+              className="w-full card-premium rounded-xl p-6 hover:border-primary transition-all group h-auto"
+              variant="ghost"
+            >
+              <div className="flex items-center justify-between w-full">
+                <div className="flex items-center gap-4">
+                  <div className="h-12 w-12 rounded-full bg-primary/20 flex items-center justify-center">
+                    <Utensils className="h-6 w-6 text-primary" />
+                  </div>
+                  <div className="text-left">
+                    <h3 className="font-display text-lg font-semibold">🍽️ Меню</h3>
+                    <p className="text-sm text-muted-foreground">Виж менюто</p>
+                  </div>
+                </div>
+                <ArrowRight className="h-5 w-5 text-muted-foreground group-hover:text-primary transition-colors" />
+              </div>
+            </Button>
+          ) : (
+            <div className="w-full card-premium rounded-xl p-6 border border-border/50 opacity-60">
               <div className="flex items-center gap-4">
-                <div className="h-12 w-12 rounded-full bg-primary/20 flex items-center justify-center">
-                  <Utensils className="h-6 w-6 text-primary" />
+                <div className="h-12 w-12 rounded-full bg-muted/40 flex items-center justify-center">
+                  <Utensils className="h-6 w-6 text-muted-foreground" />
                 </div>
                 <div className="text-left">
                   <h3 className="font-display text-lg font-semibold">🍽️ Меню</h3>
-                  <p className="text-sm text-muted-foreground">Виж менюто</p>
+                  <p className="text-sm text-muted-foreground">Няма меню за деня</p>
                 </div>
               </div>
-              <ArrowRight className="h-5 w-5 text-muted-foreground group-hover:text-primary transition-colors" />
             </div>
-          </Button>
+          )}
 
         </div>
       </div>
