@@ -780,7 +780,7 @@ const CustomerMenu: React.FC = () => {
                   size="icon"
                   variant="ghost"
                   className="h-9 w-9 sm:h-10 sm:w-10 md:h-11 md:w-11 rounded-xl hover:bg-secondary/60 active:scale-95 transition-all touch-manipulation flex-shrink-0 shadow-sm"
-                  onClick={() => navigate('/')}
+                  onClick={() => navigate(-1)}
                   aria-label="Go back"
                 >
                   <ArrowLeft className="h-4 w-4 sm:h-4.5 sm:w-4.5 md:h-5 md:w-5" />
