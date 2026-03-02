@@ -882,6 +882,7 @@ const CustomerMenu: React.FC = () => {
             );
           })}
         </div>
+          )}
         <DragOverlay>
           {activeDraggedMenuItem ? (
             <div className="bg-card border border-primary/50 rounded-lg p-3 shadow-lg opacity-95">
@@ -890,7 +891,6 @@ const CustomerMenu: React.FC = () => {
             </div>
           ) : null}
         </DragOverlay>
-          )}
         </main>
 
       {/* Fixed Bottom Actions */}
