@@ -12,6 +12,65 @@ import RatingModal from '@/components/RatingModal';
 import { trackQRScan } from '@/utils/analytics';
 import { triggerHapticFeedback, isOnline } from '@/utils/optimization';
 import { cn } from '@/lib/utils';
+import {
+  DndContext,
+  DragOverlay,
+  closestCenter,
+  PointerSensor,
+  useDroppable,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+  DragStartEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+
+const SortableMenuItemRow: React.FC<{
+  item: MenuItem;
+  quantity: number;
+  onAdd: () => void;
+  onRemove: () => void;
+  disabled: boolean;
+  isLoading: boolean;
+}> = ({ item, quantity, onAdd, onRemove, disabled, isLoading }) => {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition: isDragging ? 'none' : transition,
+    opacity: isDragging ? 0.6 : 1,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      className={cn(
+        'cursor-grab active:cursor-grabbing',
+        isDragging && 'ring-2 ring-primary/20 rounded-lg'
+      )}
+    >
+      <MenuItemCard
+        id={item.id}
+        name={item.name}
+        price={item.price}
+        description={item.desc || item.description}
+        quantity={quantity}
+        onAdd={onAdd}
+        onRemove={onRemove}
+        disabled={disabled}
+        isLoading={isLoading}
+      />
+    </div>
+  );
+};
 
 const CustomerMenu: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -87,6 +146,8 @@ const CustomerMenu: React.FC = () => {
   const [pendingItems, setPendingItems] = useState<Array<{ id: string; name: string; price: number; quantity: number }>>([]);
   const [dailyMenuItems, setDailyMenuItems] = useState<MenuItem[]>([]);
   const [dailyMenuLoading, setDailyMenuLoading] = useState(false);
+  const [dailyCategoryOrder, setDailyCategoryOrder] = useState<Record<string, string[]>>({});
+  const [activeMenuDragId, setActiveMenuDragId] = useState<string | null>(null);
   
   // Check if menu should be hidden (after 15:00) - DISABLED FOR NOW
   const isMenuHidden = false; // Toggle back: useMemo(() => { const hour = new Date().getHours(); return hour >= 15; }, []);
@@ -107,12 +168,27 @@ const CustomerMenu: React.FC = () => {
       const items = await getDailyMenuItems();
       if (!mounted) return;
       setDailyMenuItems(items);
+      // Initialize per-category order (display only)
+      const order: Record<string, string[]> = {};
+      items.forEach((it) => {
+        const category = it.cat && it.cat.trim() ? it.cat.trim() : '📦 Други';
+        if (!order[category]) order[category] = [];
+        order[category].push(it.id);
+      });
+      setDailyCategoryOrder(order);
       setDailyMenuLoading(false);
     })();
     return () => {
       mounted = false;
     };
   }, [getDailyMenuItems]);
+
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, {
+      // Prevent accidental drags when tapping +/- or scrolling
+      activationConstraint: { distance: 8 },
+    })
+  );
   
   const session = getTableSession(tableId);
   
@@ -300,6 +376,17 @@ const CustomerMenu: React.FC = () => {
       return acc;
     }, {} as Record<string, MenuItem[]>);
   }, [dailyMenuItems]);
+
+  const dailyItemsById = useMemo(() => {
+    return new Map(dailyMenuItems.map((i) => [i.id, i] as const));
+  }, [dailyMenuItems]);
+
+  const cartDrop = useDroppable({ id: 'cart_drop' });
+  const drawerDrop = useDroppable({ id: 'cart_drawer_drop' });
+  const activeDraggedMenuItem = useMemo(() => {
+    if (!activeMenuDragId) return null;
+    return dailyItemsById.get(activeMenuDragId) || null;
+  }, [activeMenuDragId, dailyItemsById]);
 
   // Filter out empty categories and sort them
   const sortedCategories = useMemo(() => {
@@ -600,90 +687,153 @@ const CustomerMenu: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen pb-24 sm:pb-28 md:pb-32" style={{ paddingBottom: 'max(6rem, env(safe-area-inset-bottom))' }}>
-      {/* Header */}
-      <header className="sticky top-0 z-40 bg-background/98 backdrop-blur-md border-b border-border/50" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-4 sm:py-6">
-          {isOffline && (
-            <div className="mb-3 px-3 py-2 bg-yellow-500/20 border border-yellow-500/30 rounded-lg text-xs text-yellow-200 animate-fade-in">
-              ⚠️ Няма интернет връзка. Някои функции може да не работят.
-            </div>
-          )}
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3 sm:gap-5 min-w-0 flex-1">
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-10 w-10 sm:h-11 sm:w-11 rounded-full hover:bg-secondary/50 transition-colors touch-manipulation flex-shrink-0"
-                onClick={() => navigate('/')}
-                aria-label="Go back"
-              >
-                <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
-              </Button>
-              <div className="min-w-0 flex-1">
-                <h1 className="font-display text-xl sm:text-2xl font-light text-foreground tracking-wider truncate">
-                  ATLAS HOUSE
-                </h1>
-                <p className="text-xs text-muted-foreground mt-0.5 sm:mt-1 font-light tracking-wider uppercase truncate">
-                  {tableId.replace('_', ' ')}
-                </p>
+    <DndContext
+      sensors={dndSensors}
+      collisionDetection={closestCenter}
+      onDragStart={(event: DragStartEvent) => {
+        setActiveMenuDragId(String(event.active.id));
+      }}
+      onDragEnd={(event: DragEndEvent) => {
+        const { active, over } = event;
+        setActiveMenuDragId(null);
+        if (!over) return;
+
+        // Drop onto cart badge OR cart drawer => add to pending items (+1) and open drawer
+        if (String(over.id) === 'cart_drop' || String(over.id) === 'cart_drawer_drop') {
+          const draggedItem = dailyItemsById.get(String(active.id));
+          if (!draggedItem) return;
+          setPendingItems((prev) => {
+            const existing = prev.find((p) => p.id === draggedItem.id);
+            if (existing) {
+              return prev.map((p) =>
+                p.id === draggedItem.id ? { ...p, quantity: p.quantity + 1 } : p
+              );
+            }
+            return [
+              ...prev,
+              { id: draggedItem.id, name: draggedItem.name, price: draggedItem.price, quantity: 1 },
+            ];
+          });
+          setCartDrawerOpen(true);
+          triggerHapticFeedback('medium');
+          toast({
+            title: '✅ Добавено в кошницата',
+            description: `${draggedItem.name} е добавен(о) в кошницата.`,
+            duration: 2000,
+          });
+          return;
+        }
+
+        // Otherwise: reorder inside same category (visual only)
+        if (active.id === over.id) return;
+        const activeItem = dailyItemsById.get(String(active.id));
+        const overItem = dailyItemsById.get(String(over.id));
+        if (!activeItem || !overItem) return;
+
+        const categoryKey = (activeItem.cat && activeItem.cat.trim()) ? activeItem.cat.trim() : '📦 Други';
+        const overCategoryKey = (overItem.cat && overItem.cat.trim()) ? overItem.cat.trim() : '📦 Други';
+        if (categoryKey !== overCategoryKey) return;
+
+        setDailyCategoryOrder((prev) => {
+          const current = prev[categoryKey] || groupedItems[categoryKey]?.map((i) => i.id) || [];
+          const oldIndex = current.indexOf(String(active.id));
+          const newIndex = current.indexOf(String(over.id));
+          if (oldIndex === -1 || newIndex === -1) return prev;
+          const next = [...current];
+          const [moved] = next.splice(oldIndex, 1);
+          next.splice(newIndex, 0, moved);
+          return { ...prev, [categoryKey]: next };
+        });
+      }}
+    >
+      <div className="min-h-screen pb-24 sm:pb-28 md:pb-32" style={{ paddingBottom: 'max(6rem, env(safe-area-inset-bottom))' }}>
+        {/* Header */}
+        <header className="sticky top-0 z-40 bg-background/98 backdrop-blur-md border-b border-border/50" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
+          <div className="max-w-3xl mx-auto px-4 sm:px-6 py-4 sm:py-6">
+            {isOffline && (
+              <div className="mb-3 px-3 py-2 bg-yellow-500/20 border border-yellow-500/30 rounded-lg text-xs text-yellow-200 animate-fade-in">
+                ⚠️ Няма интернет връзка. Някои функции може да не работят.
               </div>
-            </div>
-            
-            {/* Bill Summary - Small, top right corner */}
-            {/* Only show when there are pending items to submit OR confirmed orders */}
-            {!session.isLocked && (pendingItems.length > 0 || totalBill > 0) && (
-              <div 
-                className="flex items-center gap-2 p-2 sm:p-2.5 bg-card/50 border border-border/50 rounded-lg cursor-pointer hover:bg-card/80 transition-all touch-manipulation flex-shrink-0 min-w-[140px] sm:min-w-[160px]"
-                onClick={() => setCartDrawerOpen(true)}
-              >
-                <div className="h-6 w-6 sm:h-7 sm:w-7 rounded bg-primary/10 flex items-center justify-center flex-shrink-0">
-                  <ShoppingBag className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-primary" />
-                </div>
+            )}
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 sm:gap-5 min-w-0 flex-1">
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-10 w-10 sm:h-11 sm:w-11 rounded-full hover:bg-secondary/50 transition-colors touch-manipulation flex-shrink-0"
+                  onClick={() => navigate('/')}
+                  aria-label="Go back"
+                >
+                  <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
+                </Button>
                 <div className="min-w-0 flex-1">
-                  {totalItemCount > 0 && (
-                    <p className="text-[10px] sm:text-xs text-muted-foreground leading-tight">
-                      {totalItemCount} {totalItemCount === 1 ? 'арт.' : 'арт.'}
-                    </p>
-                  )}
-                  <p className="font-bold text-foreground text-xs sm:text-sm truncate">
-                    {totalBill.toFixed(2)} EUR
+                  <h1 className="font-display text-xl sm:text-2xl font-light text-foreground tracking-wider truncate">
+                    ATLAS HOUSE
+                  </h1>
+                  <p className="text-xs text-muted-foreground mt-0.5 sm:mt-1 font-light tracking-wider uppercase truncate">
+                    {tableId.replace('_', ' ')}
                   </p>
                 </div>
               </div>
-            )}
-          </div>
-        </div>
-      </header>
-
-      {/* Menu */}
-      <main className="max-w-3xl mx-auto px-4 sm:px-6 py-4 sm:py-6 md:py-8">
-        {isMenuHidden ? (
-          <div className="text-center py-12">
-            <p className="text-lg text-muted-foreground">
-              Менюто е недостъпно след 15:00
-            </p>
-            <p className="text-sm text-muted-foreground mt-2">
-              Моля, използвайте другите опции
-            </p>
-          </div>
-        ) : dailyMenuLoading ? (
-          <div className="text-center py-12">
-            <div className="flex items-center justify-center gap-2 text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span>Зареждане на меню за деня...</span>
+              
+              {/* Bill Summary - Small, top right corner */}
+              {/* Only show when there are pending items to submit OR confirmed orders */}
+              {!session.isLocked && (pendingItems.length > 0 || totalBill > 0) && (
+                <div 
+                  ref={cartDrop.setNodeRef}
+                  className={cn(
+                    "flex items-center gap-2 p-2 sm:p-2.5 bg-card/50 border border-border/50 rounded-lg cursor-pointer hover:bg-card/80 transition-all touch-manipulation flex-shrink-0 min-w-[140px] sm:min-w-[160px]",
+                    cartDrop.isOver && "border-primary/60 ring-2 ring-primary/20 bg-card/80"
+                  )}
+                  onClick={() => setCartDrawerOpen(true)}
+                >
+                  <div className="h-6 w-6 sm:h-7 sm:w-7 rounded bg-primary/10 flex items-center justify-center flex-shrink-0">
+                    <ShoppingBag className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-primary" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    {totalItemCount > 0 && (
+                      <p className="text-[10px] sm:text-xs text-muted-foreground leading-tight">
+                        {totalItemCount} {totalItemCount === 1 ? 'арт.' : 'арт.'}
+                      </p>
+                    )}
+                    <p className="font-bold text-foreground text-xs sm:text-sm truncate">
+                      {totalBill.toFixed(2)} EUR
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
-        ) : dailyMenuItems.length === 0 ? (
-          <div className="text-center py-12">
-            <p className="text-lg text-muted-foreground">
-              Няма меню за деня
-            </p>
-            <p className="text-sm text-muted-foreground mt-2">
-              Моля, обърнете се към персонала.
-            </p>
-          </div>
-        ) : (
+        </header>
+
+        {/* Menu */}
+        <main className="max-w-3xl mx-auto px-4 sm:px-6 py-4 sm:py-6 md:py-8">
+          {isMenuHidden ? (
+            <div className="text-center py-12">
+              <p className="text-lg text-muted-foreground">
+                Менюто е недостъпно след 15:00
+              </p>
+              <p className="text-sm text-muted-foreground mt-2">
+                Моля, използвайте другите опции
+              </p>
+            </div>
+          ) : dailyMenuLoading ? (
+            <div className="text-center py-12">
+              <div className="flex items-center justify-center gap-2 text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Зареждане на меню за деня...</span>
+              </div>
+            </div>
+          ) : dailyMenuItems.length === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-lg text-muted-foreground">
+                Няма меню за деня
+              </p>
+              <p className="text-sm text-muted-foreground mt-2">
+                Моля, обърнете се към персонала.
+              </p>
+            </div>
+          ) : (
           <div className="space-y-8 sm:space-y-12 md:space-y-16 stagger-children">
             {sortedCategories.map(([category, items]) => {
             // Extract emoji from category name
@@ -707,28 +857,41 @@ const CustomerMenu: React.FC = () => {
                 </div>
                 
                 {/* Menu Items - Classic Restaurant Style */}
-                <div className="bg-card/30 backdrop-blur-sm rounded-lg border border-border/30 p-4 sm:p-6 space-y-0">
-                  {items.map((item) => (
-                  <MenuItemCard
-                    key={item.id}
-                    id={item.id}
-                    name={item.name}
-                    price={item.price}
-                      description={item.desc || item.description}
-                    quantity={getItemQuantity(item.id)}
-                    onAdd={() => handleAddItem(item)}
-                    onRemove={() => handleRemoveItem(item.id)}
-                    disabled={session.isLocked}
-                      isLoading={loadingItems.has(item.id)}
-                  />
-                ))}
-              </div>
+                <SortableContext
+                  items={(dailyCategoryOrder[category] || items.map((i) => i.id))}
+                  strategy={verticalListSortingStrategy}
+                >
+                  <div className="space-y-0.5 sm:space-y-1">
+                    {(dailyCategoryOrder[category] || items.map((i) => i.id))
+                      .map((id) => dailyItemsById.get(id))
+                      .filter(Boolean)
+                      .map((item) => (
+                        <SortableMenuItemRow
+                          key={item!.id}
+                          item={item!}
+                          quantity={getItemQuantity(item!.id)}
+                          onAdd={() => handleAddItem(item!)}
+                          onRemove={() => handleRemoveItem(item!.id)}
+                          disabled={session.isLocked}
+                          isLoading={loadingItems.has(item!.id)}
+                        />
+                      ))}
+                  </div>
+                </SortableContext>
             </section>
             );
           })}
         </div>
-        )}
-      </main>
+        <DragOverlay>
+          {activeDraggedMenuItem ? (
+            <div className="bg-card border border-primary/50 rounded-lg p-3 shadow-lg opacity-95">
+              <div className="font-semibold text-sm">{activeDraggedMenuItem.name}</div>
+              <div className="text-xs text-muted-foreground">{activeDraggedMenuItem.price.toFixed(2)} EUR</div>
+            </div>
+          ) : null}
+        </DragOverlay>
+          )}
+        </main>
 
       {/* Fixed Bottom Actions */}
       <div 
@@ -843,6 +1006,13 @@ const CustomerMenu: React.FC = () => {
         isLoading={loadingItems.size > 0}
         disabled={session.isLocked}
         kidsZoneFee={childTimer?.cost || 0}
+        kidsZoneTime={
+          childTimer
+            ? `${String(childTimer.hours).padStart(2, '0')}:${String(childTimer.minutes).padStart(2, '0')}:${String(childTimer.seconds).padStart(2, '0')}`
+            : undefined
+        }
+        menuDropRef={drawerDrop.setNodeRef}
+        menuDropIsOver={drawerDrop.isOver}
       />
 
       {/* Payment Modal */}
@@ -860,7 +1030,8 @@ const CustomerMenu: React.FC = () => {
         tableId={tableId}
         googlePlaceId={import.meta.env.VITE_GOOGLE_PLACE_ID}
       />
-    </div>
+      </div>
+    </DndContext>
   );
 };
 

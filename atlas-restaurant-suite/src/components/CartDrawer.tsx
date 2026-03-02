@@ -43,7 +43,10 @@ interface CartDrawerProps {
   isLoading?: boolean;
   disabled?: boolean;
   orderedItems?: Array<{ id: string; name: string; price: number; quantity: number }>; // Items from confirmed orders (read-only)
-  kidsZoneFee?: number; // Kids Zone fee from animator
+  kidsZoneFee?: number; // Kids Zone fee from animator (used for totals, display may differ)
+  kidsZoneTime?: string; // Kids Zone elapsed time display (HH:MM:SS)
+  menuDropRef?: (node: HTMLElement | null) => void; // external drop zone for menu -> drawer
+  menuDropIsOver?: boolean;
 }
 
 // Sortable Cart Item Component
@@ -212,15 +215,60 @@ const SortableOrderedItem: React.FC<{
           </div>
         </div>
       </div>
-      <div className="mt-2 pt-2 border-t border-border/50 flex items-center justify-between">
-        <span className="text-xs sm:text-sm font-semibold text-muted-foreground">
-          Подобщо:
-        </span>
+      <div className="mt-2 pt-2 border-t border-border/50 flex items-center justify-end">
         <span className="text-sm sm:text-base font-bold text-primary">
           {(item.price * item.quantity).toFixed(2)} EUR
         </span>
       </div>
     </button>
+  );
+};
+
+const KIDS_ZONE_SORTABLE_ID = 'kids_zone';
+
+const SortableKidsZoneRow: React.FC<{ time?: string }> = ({ time }) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: KIDS_ZONE_SORTABLE_ID });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition: isDragging ? 'none' : transition,
+    opacity: isDragging ? 0.6 : 0.95,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      className={cn(
+        'bg-card border border-border/50 rounded-lg px-3 py-2.5 sm:px-4 sm:py-3 transition-all',
+        'hover:border-primary/30 hover:shadow-sm hover:bg-card/80',
+        isDragging && 'shadow-lg ring-2 ring-primary/20 z-50 cursor-grabbing',
+        !isDragging && 'cursor-grab active:cursor-grabbing'
+      )}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-base">🎭</span>
+          <span className="font-semibold text-sm sm:text-base text-foreground truncate">
+            Детски кът
+          </span>
+        </div>
+        {time && (
+          <span className="font-mono text-sm sm:text-base font-bold text-primary flex-shrink-0">
+            {time}
+          </span>
+        )}
+      </div>
+    </div>
   );
 };
 
@@ -239,11 +287,15 @@ const CartDrawer: React.FC<CartDrawerProps> = ({
   disabled = false,
   orderedItems = [],
   kidsZoneFee = 0,
+  kidsZoneTime,
+  menuDropRef,
+  menuDropIsOver = false,
 }) => {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [activeType, setActiveType] = useState<'cart' | 'ordered' | null>(null);
   const [items, setItems] = useState<CartItem[]>(cartItems);
   const [ordered, setOrdered] = useState<Array<{ id: string; name: string; price: number; quantity: number }>>(orderedItems);
+  const [orderedDisplayIds, setOrderedDisplayIds] = useState<string[]>([]);
 
   // Update local items when props change
   useEffect(() => {
@@ -254,6 +306,15 @@ const CartDrawer: React.FC<CartDrawerProps> = ({
     setOrdered(orderedItems);
   }, [orderedItems]);
 
+  useEffect(() => {
+    const ids = orderedItems.map(i => i.id);
+    if (kidsZoneFee > 0) ids.push(KIDS_ZONE_SORTABLE_ID);
+    setOrderedDisplayIds(ids);
+  }, [orderedItems, kidsZoneFee]);
+
+  // Use the droppable ref passed from CustomerMenu's DndContext
+  // This ensures the drop zone is registered in the parent DndContext
+
   const sensors = useSensors(
     useSensor(PointerSensor),
     useSensor(KeyboardSensor)
@@ -263,7 +324,7 @@ const CartDrawer: React.FC<CartDrawerProps> = ({
     setActiveId(event.active.id as string);
     // Determine if dragging cart item or ordered item
     const isCartItem = items.some(item => item.id === event.active.id);
-    const isOrderedItem = ordered.some(item => item.id === event.active.id);
+    const isOrderedItem = orderedDisplayIds.includes(String(event.active.id));
     if (isCartItem) {
       setActiveType('cart');
     } else if (isOrderedItem) {
@@ -296,18 +357,20 @@ const CartDrawer: React.FC<CartDrawerProps> = ({
       return;
     }
 
-    // Handle ordered items reordering
-    const orderedOldIndex = ordered.findIndex((item) => item.id === active.id);
-    const orderedNewIndex = ordered.findIndex((item) => item.id === over.id);
-    
+    // Handle ordered section reordering (includes kids zone row)
+    const orderedOldIndex = orderedDisplayIds.findIndex((id) => id === active.id);
+    const orderedNewIndex = orderedDisplayIds.findIndex((id) => id === over.id);
+
     if (orderedOldIndex !== -1 && orderedNewIndex !== -1) {
-      const newOrdered = [...ordered];
-      const [movedItem] = newOrdered.splice(orderedOldIndex, 1);
-      newOrdered.splice(orderedNewIndex, 0, movedItem);
-      setOrdered(newOrdered);
-      
+      const newIds = [...orderedDisplayIds];
+      const [movedId] = newIds.splice(orderedOldIndex, 1);
+      newIds.splice(orderedNewIndex, 0, movedId);
+      setOrderedDisplayIds(newIds);
+
       if (onReorderOrderedItems) {
-        onReorderOrderedItems(newOrdered);
+        const orderedOnlyIds = newIds.filter(id => id !== KIDS_ZONE_SORTABLE_ID);
+        const byId = new Map(ordered.map(i => [i.id, i]));
+        onReorderOrderedItems(orderedOnlyIds.map(id => byId.get(id)!).filter(Boolean));
       }
       triggerHapticFeedback('medium');
     }
@@ -320,7 +383,9 @@ const CartDrawer: React.FC<CartDrawerProps> = ({
   ];
 
   const activeCartItem = activeId && activeType === 'cart' ? items.find((item) => item.id === activeId) : null;
-  const activeOrderedItem = activeId && activeType === 'ordered' ? ordered.find((item) => item.id === activeId) : null;
+  const activeOrderedItem = activeId && activeType === 'ordered'
+    ? (activeId === KIDS_ZONE_SORTABLE_ID ? { id: KIDS_ZONE_SORTABLE_ID, name: 'Детски кът', price: 0, quantity: 1 } : ordered.find((item) => item.id === activeId) || null)
+    : null;
   const handleIncrement = (itemId: string, currentQty: number) => {
     if (disabled || isLoading) return;
     triggerHapticFeedback('light');
@@ -374,9 +439,18 @@ const CartDrawer: React.FC<CartDrawerProps> = ({
           </div>
         </SheetHeader>
 
-        <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-3">
+        <div
+          ref={menuDropRef as React.Ref<HTMLDivElement>}
+          className={cn(
+            "flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-3",
+            menuDropIsOver && "ring-2 ring-primary/20 border-t border-primary/30 bg-primary/5"
+          )}
+        >
           {allItems.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-center py-12">
+            <div className={cn(
+              "flex flex-col items-center justify-center h-full text-center py-12 min-h-[200px]",
+              menuDropIsOver && "bg-primary/5 border-2 border-dashed border-primary/40 rounded-lg"
+            )}>
               <div className="h-20 w-20 rounded-full bg-muted/30 flex items-center justify-center mb-4">
                 <ShoppingBag className="h-10 w-10 text-muted-foreground/50" />
               </div>
@@ -384,7 +458,11 @@ const CartDrawer: React.FC<CartDrawerProps> = ({
                 Кошницата е празна
               </p>
               <p className="text-sm text-muted-foreground/70">
-                Добавете артикули от менюто
+                {menuDropIsOver ? (
+                  <span className="text-primary font-semibold">Отпуснете артикула тук</span>
+                ) : (
+                  "Добавете артикули от менюто"
+                )}
               </p>
             </div>
           ) : (
@@ -402,20 +480,26 @@ const CartDrawer: React.FC<CartDrawerProps> = ({
                     onDragEnd={handleDragEnd}
                   >
                     <SortableContext
-                      items={ordered.map(item => item.id)}
+                      items={orderedDisplayIds}
                       strategy={verticalListSortingStrategy}
                     >
                       <div className="space-y-2">
-                        {ordered.map((item) => (
-                          <SortableOrderedItem
-                            key={item.id}
-                            item={item}
-                            onClick={() => {
-                              // Handle click on ordered item
-                              triggerHapticFeedback('light');
-                            }}
-                          />
-                        ))}
+                        {orderedDisplayIds.map((id) => {
+                          if (id === KIDS_ZONE_SORTABLE_ID) {
+                            return <SortableKidsZoneRow key={id} time={kidsZoneTime} />;
+                          }
+                          const item = ordered.find(i => i.id === id);
+                          if (!item) return null;
+                          return (
+                            <SortableOrderedItem
+                              key={item.id}
+                              item={item}
+                              onClick={() => {
+                                triggerHapticFeedback('light');
+                              }}
+                            />
+                          );
+                        })}
                       </div>
                     </SortableContext>
                     <DragOverlay>
@@ -429,33 +513,6 @@ const CartDrawer: React.FC<CartDrawerProps> = ({
                       ) : null}
                     </DragOverlay>
                   </DndContext>
-                  
-                  {/* Kids Zone Fee */}
-                  {kidsZoneFee > 0 && (
-                    <div className="bg-card border border-border/50 rounded-lg p-3 sm:p-4 mb-2 opacity-90">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-start justify-between gap-2 mb-1">
-                            <h3 className="font-semibold text-base sm:text-lg text-foreground flex-1 flex items-center gap-2">
-                              <span>🎭</span>
-                              <span>Детски кът</span>
-                            </h3>
-                            <p className="text-sm sm:text-base font-bold text-primary flex-shrink-0">
-                              {kidsZoneFee.toFixed(2)} EUR
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="mt-2 pt-2 border-t border-border/50 flex items-center justify-between">
-                        <span className="text-xs sm:text-sm font-semibold text-muted-foreground">
-                          Подобщо:
-                        </span>
-                        <span className="text-sm sm:text-base font-bold text-primary">
-                          {kidsZoneFee.toFixed(2)} EUR
-                        </span>
-                      </div>
-                    </div>
-                  )}
                 </div>
               )}
               
