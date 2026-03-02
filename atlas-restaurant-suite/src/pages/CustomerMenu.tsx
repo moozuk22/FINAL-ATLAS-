@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useSearchParams, useNavigate, useParams } from 'react-router-dom';
-import { Send, Bell, CreditCard, Lock, ArrowLeft, Loader2, Sparkles, ShoppingBag, GripVertical } from 'lucide-react';
+import { Send, Bell, CreditCard, Lock, ArrowLeft, Loader2, Sparkles, ShoppingBag } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { useRestaurant, MenuItem } from '@/context/RestaurantContext';
@@ -68,19 +68,6 @@ const SortableMenuItemRow: React.FC<{
         }
       }}
     >
-      {/* Visual drag indicator for mobile */}
-      <div
-        className={cn(
-          'absolute left-1 top-1/2 -translate-y-1/2 z-10 p-1 rounded-md',
-          'bg-background/60 backdrop-blur-sm border border-border/30',
-          'opacity-60 sm:opacity-0 sm:group-hover:opacity-100',
-          'transition-opacity duration-200 pointer-events-none',
-          isDragging && 'opacity-100'
-        )}
-      >
-        <GripVertical className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground" />
-      </div>
-      
       <MenuItemCard
         id={item.id}
         name={item.name}
