@@ -11,7 +11,6 @@ import {
 import { CartItem } from '@/context/RestaurantContext';
 import { cn } from '@/lib/utils';
 import { triggerHapticFeedback } from '@/utils/optimization';
-import { stripAllergenNumbersFromName } from '@/utils/menu';
 import {
   DndContext,
   DragOverlay,
@@ -98,7 +97,7 @@ const SortableCartItem: React.FC<{
         <div className="flex-1 min-w-0">
           <div className="flex items-start justify-between gap-2 mb-1">
             <h3 className="font-semibold text-base sm:text-lg text-foreground flex-1">
-              {stripAllergenNumbersFromName(item.name)}
+              {item.name}
             </h3>
             <p className="text-sm sm:text-base font-bold text-primary flex-shrink-0">
               {item.price.toFixed(2)} EUR
@@ -201,7 +200,7 @@ const SortableOrderedItem: React.FC<{
         <div className="flex-1 min-w-0">
           <div className="flex items-start justify-between gap-2 mb-1">
             <h3 className="font-semibold text-base sm:text-lg text-foreground flex-1">
-              {stripAllergenNumbersFromName(item.name)}
+              {item.name}
             </h3>
             <p className="text-sm sm:text-base font-bold text-primary flex-shrink-0">
               {item.price.toFixed(2)} EUR
