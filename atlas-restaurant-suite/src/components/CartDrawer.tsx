@@ -18,6 +18,7 @@ import {
   closestCenter,
   KeyboardSensor,
   PointerSensor,
+  TouchSensor,
   useSensor,
   useSensors,
   DragEndEvent,
@@ -78,19 +79,28 @@ const SortableCartItem: React.FC<{
     <div
       ref={setNodeRef}
       style={style}
+      {...attributes}
+      {...listeners}
       className={cn(
         'bg-card border border-border rounded-lg p-3 sm:p-4 transition-all',
         'hover:border-primary/30 hover:shadow-md',
-        isDragging && 'shadow-lg ring-2 ring-primary/20 z-50'
+        isDragging && 'shadow-lg ring-2 ring-primary/20 z-50',
+        'cursor-grab active:cursor-grabbing touch-manipulation',
+        // Prevent drag when interacting with buttons
+        '[&_button]:pointer-events-auto [&_button]:z-20'
       )}
+      onTouchStart={(e) => {
+        // Allow drag on touch devices - buttons will still work due to pointer-events-auto
+        const target = e.target as HTMLElement;
+        if (target.closest('button')) {
+          // Don't prevent default for buttons
+          return;
+        }
+      }}
     >
       <div className="flex items-start justify-between gap-3">
-        {/* Drag Handle */}
-        <div
-          {...attributes}
-          {...listeners}
-          className="cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground pt-1 flex-shrink-0"
-        >
+        {/* Drag Handle - Hidden on mobile, visible on desktop */}
+        <div className="hidden sm:block cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground pt-1 flex-shrink-0 pointer-events-none">
           <GripVertical className="h-5 w-5" />
         </div>
 
@@ -194,7 +204,7 @@ const SortableOrderedItem: React.FC<{
         'hover:border-primary/30 hover:shadow-md hover:bg-card/80',
         'focus:outline-none focus:ring-2 focus:ring-primary/20 focus:ring-offset-2',
         isDragging && 'shadow-lg ring-2 ring-primary/20 z-50 cursor-grabbing',
-        !isDragging && 'cursor-grab active:cursor-grabbing'
+        !isDragging && 'cursor-grab active:cursor-grabbing touch-manipulation'
       )}
     >
       <div className="flex items-start justify-between gap-3">
@@ -253,7 +263,7 @@ const SortableKidsZoneRow: React.FC<{ time?: string }> = ({ time }) => {
         'bg-card border border-border/50 rounded-lg px-3 py-2.5 sm:px-4 sm:py-3 transition-all',
         'hover:border-primary/30 hover:shadow-sm hover:bg-card/80',
         isDragging && 'shadow-lg ring-2 ring-primary/20 z-50 cursor-grabbing',
-        !isDragging && 'cursor-grab active:cursor-grabbing'
+        !isDragging && 'cursor-grab active:cursor-grabbing touch-manipulation'
       )}
     >
       <div className="flex items-center justify-between gap-3">
@@ -317,7 +327,18 @@ const CartDrawer: React.FC<CartDrawerProps> = ({
   // This ensures the drop zone is registered in the parent DndContext
 
   const sensors = useSensors(
-    useSensor(PointerSensor),
+    useSensor(PointerSensor, {
+      // Prevent accidental drags when tapping buttons or scrolling
+      activationConstraint: { distance: 8 },
+    }),
+    useSensor(TouchSensor, {
+      // Optimized for mobile: lower activation distance, allow immediate drag
+      activationConstraint: { 
+        distance: 5, // Smaller distance for touch devices
+        delay: 0, // No delay for immediate response
+        tolerance: 5 // Tolerance for touch movement
+      },
+    }),
     useSensor(KeyboardSensor)
   );
 

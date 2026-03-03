@@ -8,6 +8,7 @@ import { useRestaurant, MenuItem } from '@/context/RestaurantContext';
 import { useToast } from '@/hooks/use-toast';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { stripAllergenNumbersFromName } from '@/utils/menu';
+import { cn } from '@/lib/utils';
 import {
   Dialog,
   DialogContent,
@@ -29,10 +30,12 @@ import {
   closestCenter,
   KeyboardSensor,
   PointerSensor,
+  TouchSensor,
   useSensor,
   useSensors,
   DragEndEvent,
   DragStartEvent,
+  DragOverEvent,
   useDroppable,
 } from '@dnd-kit/core';
 import {
@@ -41,6 +44,182 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+
+// Draggable Available Item Component (for "Всички артикули")
+const DraggableAvailableItem: React.FC<{
+  item: MenuItem;
+  onAdd: () => void;
+}> = ({ item, onAdd }) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: item.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition: isDragging ? 'none' : transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      className="flex items-center justify-between p-2 sm:p-2.5 border rounded hover:bg-secondary/50 gap-2 cursor-grab active:cursor-grabbing touch-manipulation [&_button]:pointer-events-auto [&_button]:z-20"
+      onTouchStart={(e) => {
+        const target = e.target as HTMLElement;
+        if (target.closest('button')) {
+          return;
+        }
+      }}
+    >
+      <div className="flex-1 min-w-0">
+        <p className="text-xs sm:text-sm font-medium truncate">{stripAllergenNumbersFromName(item.name)}</p>
+        <p className="text-[10px] sm:text-xs text-muted-foreground">{item.price.toFixed(2)} EUR</p>
+      </div>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={(e) => {
+          e.stopPropagation();
+          onAdd();
+        }}
+        className="ml-1 sm:ml-2 text-xs sm:text-sm h-7 sm:h-8 px-2 sm:px-3 flex-shrink-0"
+      >
+        Добави
+      </Button>
+    </div>
+  );
+};
+
+// Droppable Zone Component for Daily Menu columns
+const DailyDropZone: React.FC<{
+  id: string;
+  title: string;
+  children: React.ReactNode;
+}> = ({ id, title, children }) => {
+  const { setNodeRef, isOver } = useDroppable({ id });
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={cn(
+        'border rounded-lg p-3 sm:p-4 overflow-y-auto max-h-[60vh] sm:max-h-[70vh] transition-all',
+        isOver && 'ring-2 ring-primary/30 border-primary/50 bg-primary/5'
+      )}
+    >
+      <h3 className="font-semibold mb-3">{title}</h3>
+      {children}
+    </div>
+  );
+};
+
+// Sortable Daily Item Component (for "Меню за деня")
+const SortableDailyItem: React.FC<{
+  item: MenuItem;
+  onEdit: () => void;
+  onRemove: () => void;
+  isEditing: boolean;
+  editText: string;
+  onEditTextChange: (text: string) => void;
+  onCancelEdit: () => void;
+}> = ({ item, onEdit, onRemove, isEditing, editText, onEditTextChange, onCancelEdit }) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: item.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition: isDragging ? 'none' : transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      className="flex items-center justify-between p-2 sm:p-2.5 border rounded hover:bg-secondary/50 gap-2 cursor-grab active:cursor-grabbing touch-manipulation [&_button]:pointer-events-auto [&_button]:z-20"
+      onTouchStart={(e) => {
+        const target = e.target as HTMLElement;
+        if (target.closest('button') || target.closest('input')) {
+          return;
+        }
+      }}
+    >
+      <div className="flex-1 min-w-0">
+        {isEditing ? (
+          <Input
+            value={editText}
+            onChange={(e) => onEditTextChange(e.target.value)}
+            className="h-7 sm:h-8 text-xs sm:text-sm"
+            autoFocus
+            onClick={(e) => e.stopPropagation()}
+          />
+        ) : (
+          <>
+            <p className="text-xs sm:text-sm font-medium truncate">{stripAllergenNumbersFromName(item.name)}</p>
+            <p className="text-[10px] sm:text-xs text-muted-foreground">{item.price.toFixed(2)} EUR</p>
+          </>
+        )}
+      </div>
+      <div className="flex items-center gap-1 sm:gap-1.5 ml-1 sm:ml-2 flex-shrink-0">
+        {isEditing ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={(e) => {
+              e.stopPropagation();
+              onCancelEdit();
+            }}
+            className="h-7 w-7 sm:h-8 sm:w-8 p-0"
+          >
+            <X className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+          </Button>
+        ) : (
+          <>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit();
+              }}
+              className="h-7 w-7 sm:h-8 sm:w-8 p-0"
+              title="Редактирай"
+            >
+              <Edit2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={(e) => {
+                e.stopPropagation();
+                onRemove();
+              }}
+              className="h-7 w-7 sm:h-8 sm:w-8 p-0 text-destructive"
+              title="Премахни"
+            >
+              <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            </Button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
 
 // Draggable Menu Item Component
 const DraggableMenuItem: React.FC<{
@@ -76,10 +255,18 @@ const DraggableMenuItem: React.FC<{
       {...(!isBulkMode ? listeners : {})}
       className={`bg-card border rounded-lg p-2.5 sm:p-3 md:p-4 flex items-center justify-between transition-all duration-200 ${
         isSelected ? 'border-primary bg-primary/5 shadow-sm' : 'border-border hover:border-primary/30 hover:shadow-sm'
-      } ${isBulkMode ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing'} ${
+      } ${isBulkMode ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing touch-manipulation'} ${
         isDragging ? 'shadow-lg ring-2 ring-primary/20' : ''
-      }`}
+      } ${!isBulkMode ? '[&_button]:pointer-events-auto [&_button]:z-20' : ''}`}
       onClick={isBulkMode && onToggleSelect ? () => onToggleSelect(item.id) : undefined}
+      onTouchStart={!isBulkMode ? (e) => {
+        // Allow drag on touch devices - buttons will still work due to pointer-events-auto
+        const target = e.target as HTMLElement;
+        if (target.closest('button')) {
+          // Don't prevent default for buttons
+          return;
+        }
+      } : undefined}
     >
       <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
         {isBulkMode && onToggleSelect && (
@@ -329,12 +516,22 @@ const MenuEditor: React.FC = () => {
   const [dailyMenuLoading, setDailyMenuLoading] = useState(false);
   const [editingDailyItem, setEditingDailyItem] = useState<string | null>(null);
   const [editDailyText, setEditDailyText] = useState('');
+  const [activeDailyDragId, setActiveDailyDragId] = useState<string | null>(null);
 
   // Sensors for drag and drop
   const sensors = useSensors(
     useSensor(PointerSensor, {
+      // Prevent accidental drags when tapping buttons or scrolling
       activationConstraint: {
         distance: 8,
+      },
+    }),
+    useSensor(TouchSensor, {
+      // Optimized for mobile: lower activation distance, allow immediate drag
+      activationConstraint: { 
+        distance: 5, // Smaller distance for touch devices
+        delay: 0, // No delay for immediate response
+        tolerance: 5 // Tolerance for touch movement
       },
     }),
     useSensor(KeyboardSensor)
@@ -981,6 +1178,67 @@ const MenuEditor: React.FC = () => {
     return menuItems.filter(item => !dailyItemIds.includes(item.id));
   }, [menuItems, dailyItems]);
 
+  // Daily Menu Drag and Drop handlers
+  const handleDailyDragStart = (event: DragStartEvent) => {
+    setActiveDailyDragId(event.active.id as string);
+  };
+
+  const handleDailyDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    setActiveDailyDragId(null);
+
+    if (!over) return;
+
+    const activeId = active.id as string;
+    const overId = over.id as string;
+
+    const isFromAvailable = availableItems.some(item => item.id === activeId);
+    const isFromDaily = dailyItems.some(item => item.id === activeId);
+    const isOverDailyItem = dailyItems.some(item => item.id === overId);
+    const isOverAvailableItem = availableItems.some(item => item.id === overId);
+
+    // Check if dragging from "Всички артикули" to "Меню за деня" (drop zone or daily item)
+    if (isFromAvailable && (overId === 'daily-menu-drop' || isOverDailyItem)) {
+      const item = availableItems.find(i => i.id === activeId);
+      if (item) {
+        await handleAddToDaily(item);
+        return;
+      }
+    }
+
+    // Check if dragging from "Меню за деня" to "Всички артикули" (drop zone or available item)
+    if (isFromDaily && (overId === 'available-items-drop' || isOverAvailableItem)) {
+      await handleRemoveFromDaily(activeId);
+      return;
+    }
+
+    // Reorder within "Меню за деня"
+    if (isFromDaily && isOverDailyItem && activeId !== overId) {
+      const oldIndex = dailyItems.findIndex(item => item.id === activeId);
+      const newIndex = dailyItems.findIndex(item => item.id === overId);
+
+      if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
+        const newItems = [...dailyItems];
+        const [movedItem] = newItems.splice(oldIndex, 1);
+        newItems.splice(newIndex, 0, movedItem);
+
+        // Update order in database
+        const newItemIds = newItems.map(i => i.id);
+        try {
+          await setDailyMenuItems(selectedDate, newItemIds);
+          setDailyItems(newItems);
+        } catch (error) {
+          console.error('Error reordering daily menu:', error);
+          toast({
+            title: 'Грешка',
+            description: 'Неуспешно пренареждане',
+            variant: 'destructive',
+          });
+        }
+      }
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background">
       {/* Header - Mobile Optimized */}
@@ -1249,135 +1507,106 @@ const MenuEditor: React.FC = () => {
           </TabsContent>
 
           <TabsContent value="daily" className="mt-0">
-            <div className="space-y-4">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4 mb-4">
-                <Input
-                  type="date"
-                  value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                  className="w-full sm:w-auto text-xs sm:text-sm"
-                />
-                <Button onClick={loadDailyMenu} disabled={dailyMenuLoading} variant="outline" className="w-full sm:w-auto text-xs sm:text-sm h-8 sm:h-9">
-                  Зареди
-                </Button>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
-                {/* All Items Column */}
-                <div className="border rounded-lg p-3 sm:p-4 overflow-y-auto max-h-[60vh] sm:max-h-[70vh]">
-                  <h3 className="font-semibold mb-3">Всички артикули</h3>
-                  {dailyMenuLoading ? (
-                    <p className="text-muted-foreground text-sm">Зареждане...</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {availableItems.map(item => (
-                        <div
-                          key={item.id}
-                          className="flex items-center justify-between p-2 sm:p-2.5 border rounded hover:bg-secondary/50 gap-2"
-                        >
-                          <div className="flex-1 min-w-0">
-                            <p className="text-xs sm:text-sm font-medium truncate">{stripAllergenNumbersFromName(item.name)}</p>
-                            <p className="text-[10px] sm:text-xs text-muted-foreground">{item.price.toFixed(2)} EUR</p>
-                          </div>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleAddToDaily(item)}
-                            className="ml-1 sm:ml-2 text-xs sm:text-sm h-7 sm:h-8 px-2 sm:px-3 flex-shrink-0"
-                          >
-                            Добави
-                          </Button>
-                        </div>
-                      ))}
-                      {availableItems.length === 0 && (
-                        <p className="text-muted-foreground text-sm text-center py-4">
-                          Всички артикули са в менюто за деня
-                        </p>
-                      )}
-                    </div>
-                  )}
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragStart={handleDailyDragStart}
+              onDragEnd={handleDailyDragEnd}
+            >
+              <div className="space-y-4">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4 mb-4">
+                  <Input
+                    type="date"
+                    value={selectedDate}
+                    onChange={(e) => setSelectedDate(e.target.value)}
+                    className="w-full sm:w-auto text-xs sm:text-sm"
+                  />
+                  <Button onClick={loadDailyMenu} disabled={dailyMenuLoading} variant="outline" className="w-full sm:w-auto text-xs sm:text-sm h-8 sm:h-9">
+                    Зареди
+                  </Button>
                 </div>
 
-                {/* Daily Menu Items Column */}
-                <div className="border rounded-lg p-3 sm:p-4 overflow-y-auto max-h-[50vh] sm:max-h-[70vh]">
-                  <h3 className="font-semibold text-sm sm:text-base mb-2 sm:mb-3">Меню за деня</h3>
-                  {dailyMenuLoading ? (
-                    <p className="text-muted-foreground text-sm">Зареждане...</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {dailyItems.map(item => (
-                        <div
-                          key={item.id}
-                          className="flex items-center justify-between p-2 sm:p-2.5 border rounded hover:bg-secondary/50 gap-2"
-                        >
-                          <div className="flex-1 min-w-0">
-                            {editingDailyItem === item.id ? (
-                              <Input
-                                value={editDailyText}
-                                onChange={(e) => setEditDailyText(e.target.value)}
-                                className="h-7 sm:h-8 text-xs sm:text-sm"
-                                autoFocus
-                              />
-                            ) : (
-                              <>
-                                <p className="text-xs sm:text-sm font-medium truncate">{stripAllergenNumbersFromName(item.name)}</p>
-                                <p className="text-[10px] sm:text-xs text-muted-foreground">{item.price.toFixed(2)} EUR</p>
-                              </>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-1 sm:gap-1.5 ml-1 sm:ml-2 flex-shrink-0">
-                            {editingDailyItem === item.id ? (
-                              <>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => {
-                                    setEditingDailyItem(null);
-                                    setEditDailyText('');
-                                  }}
-                                  className="h-7 w-7 sm:h-8 sm:w-8 p-0"
-                                >
-                                  <X className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                                </Button>
-                              </>
-                            ) : (
-                              <>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => {
-                                    setEditingDailyItem(item.id);
-                                    setEditDailyText(item.name);
-                                  }}
-                                  className="h-7 w-7 sm:h-8 sm:w-8 p-0"
-                                  title="Редактирай"
-                                >
-                                  <Edit2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => handleRemoveFromDaily(item.id)}
-                                  className="h-7 w-7 sm:h-8 sm:w-8 p-0 text-destructive"
-                                  title="Премахни"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                                </Button>
-                              </>
-                            )}
-                          </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
+                  {/* All Items Column */}
+                  <DailyDropZone id="available-items-drop" title="Всички артикули">
+                    {dailyMenuLoading ? (
+                      <p className="text-muted-foreground text-sm">Зареждане...</p>
+                    ) : (
+                      <SortableContext
+                        items={availableItems.map(item => item.id)}
+                        strategy={verticalListSortingStrategy}
+                      >
+                        <div className="space-y-2">
+                          {availableItems.map(item => (
+                            <DraggableAvailableItem
+                              key={item.id}
+                              item={item}
+                              onAdd={() => handleAddToDaily(item)}
+                            />
+                          ))}
+                          {availableItems.length === 0 && (
+                            <p className="text-muted-foreground text-sm text-center py-4">
+                              Всички артикули са в менюто за деня
+                            </p>
+                          )}
                         </div>
-                      ))}
-                      {dailyItems.length === 0 && (
-                        <p className="text-muted-foreground text-sm text-center py-4">
-                          Няма артикули в менюто за деня
-                        </p>
-                      )}
-                    </div>
-                  )}
+                      </SortableContext>
+                    )}
+                  </DailyDropZone>
+
+                  {/* Daily Menu Items Column */}
+                  <DailyDropZone id="daily-menu-drop" title="Меню за деня">
+                    {dailyMenuLoading ? (
+                      <p className="text-muted-foreground text-sm">Зареждане...</p>
+                    ) : (
+                      <SortableContext
+                        items={dailyItems.map(item => item.id)}
+                        strategy={verticalListSortingStrategy}
+                      >
+                        <div className="space-y-2">
+                          {dailyItems.map(item => (
+                            <SortableDailyItem
+                              key={item.id}
+                              item={item}
+                              onEdit={() => {
+                                setEditingDailyItem(item.id);
+                                setEditDailyText(item.name);
+                              }}
+                              onRemove={() => handleRemoveFromDaily(item.id)}
+                              isEditing={editingDailyItem === item.id}
+                              editText={editDailyText}
+                              onEditTextChange={setEditDailyText}
+                              onCancelEdit={() => {
+                                setEditingDailyItem(null);
+                                setEditDailyText('');
+                              }}
+                            />
+                          ))}
+                          {dailyItems.length === 0 && (
+                            <p className="text-muted-foreground text-sm text-center py-4">
+                              Няма артикули в менюто за деня
+                            </p>
+                          )}
+                        </div>
+                      </SortableContext>
+                    )}
+                  </DailyDropZone>
                 </div>
               </div>
-            </div>
+              <DragOverlay>
+                {activeDailyDragId ? (
+                  <div className="bg-card border border-primary rounded-lg p-2 sm:p-2.5 shadow-lg opacity-90">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs sm:text-sm font-medium">
+                        {availableItems.find(i => i.id === activeDailyDragId)?.name || 
+                         dailyItems.find(i => i.id === activeDailyDragId)?.name || 
+                         'Артикул'}
+                      </span>
+                    </div>
+                  </div>
+                ) : null}
+              </DragOverlay>
+            </DndContext>
           </TabsContent>
         </Tabs>
       </main>
