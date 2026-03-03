@@ -85,10 +85,16 @@ const SortableCartItem: React.FC<{
         'bg-card border border-border rounded-lg p-3 sm:p-4 transition-all',
         'hover:border-primary/30 hover:shadow-md',
         isDragging && 'shadow-lg ring-2 ring-primary/20 z-50 opacity-90',
-        'cursor-grab active:cursor-grabbing touch-manipulation min-h-[60px]',
+        'cursor-grab active:cursor-grabbing min-h-[60px]',
         // Prevent drag when interacting with buttons
-        '[&_button]:pointer-events-auto [&_button]:z-20'
+        '[&_button]:pointer-events-auto [&_button]:z-20 [&_button]:touch-action-manipulation'
       )}
+      style={{
+        touchAction: 'none', // Enable drag on touch devices
+        WebkitTouchCallout: 'none', // Disable iOS callout
+        WebkitUserSelect: 'none', // Disable text selection
+        userSelect: 'none',
+      }}
       onTouchStart={(e) => {
         // Allow drag on touch devices - buttons will still work due to pointer-events-auto
         const target = e.target as HTMLElement;
@@ -96,6 +102,7 @@ const SortableCartItem: React.FC<{
           // Don't prevent default for buttons and inputs
           return;
         }
+        // Enable drag for the element itself
       }}
     >
       <div className="flex items-start justify-between gap-3">
@@ -204,14 +211,21 @@ const SortableOrderedItem: React.FC<{
         'hover:border-primary/30 hover:shadow-md hover:bg-card/80',
         'focus:outline-none focus:ring-2 focus:ring-primary/20 focus:ring-offset-2',
         isDragging && 'shadow-lg ring-2 ring-primary/20 z-50 cursor-grabbing opacity-90',
-        !isDragging && 'cursor-grab active:cursor-grabbing touch-manipulation min-h-[60px]'
+        !isDragging && 'cursor-grab active:cursor-grabbing min-h-[60px]'
       )}
+      style={{
+        touchAction: 'none', // Enable drag on touch devices
+        WebkitTouchCallout: 'none', // Disable iOS callout
+        WebkitUserSelect: 'none', // Disable text selection
+        userSelect: 'none',
+      }}
       onTouchStart={(e) => {
         // Ensure touch events work properly for drag
         const target = e.target as HTMLElement;
         if (target.closest('button') || target.closest('input')) {
           return;
         }
+        // Enable drag for the element itself
       }}
     >
       <div className="flex items-start justify-between gap-3">
@@ -270,14 +284,21 @@ const SortableKidsZoneRow: React.FC<{ time?: string }> = ({ time }) => {
         'bg-card border border-border/50 rounded-lg px-3 py-2.5 sm:px-4 sm:py-3 transition-all',
         'hover:border-primary/30 hover:shadow-sm hover:bg-card/80',
         isDragging && 'shadow-lg ring-2 ring-primary/20 z-50 cursor-grabbing opacity-90',
-        !isDragging && 'cursor-grab active:cursor-grabbing touch-manipulation min-h-[44px]'
+        !isDragging && 'cursor-grab active:cursor-grabbing min-h-[44px]'
       )}
+      style={{
+        touchAction: 'none', // Enable drag on touch devices
+        WebkitTouchCallout: 'none', // Disable iOS callout
+        WebkitUserSelect: 'none', // Disable text selection
+        userSelect: 'none',
+      }}
       onTouchStart={(e) => {
         // Ensure touch events work properly for drag
         const target = e.target as HTMLElement;
         if (target.closest('button') || target.closest('input')) {
           return;
         }
+        // Enable drag for the element itself
       }}
     >
       <div className="flex items-center justify-between gap-3">
@@ -346,11 +367,11 @@ const CartDrawer: React.FC<CartDrawerProps> = ({
       activationConstraint: { distance: 8 },
     }),
     useSensor(TouchSensor, {
-      // Optimized for mobile: lower activation distance, allow immediate drag
+      // Optimized for mobile: very low activation distance for immediate drag
       activationConstraint: { 
-        distance: 5, // Smaller distance for touch devices
+        distance: 3, // Very small distance for immediate drag on touch devices
         delay: 0, // No delay for immediate response
-        tolerance: 5 // Tolerance for touch movement
+        tolerance: 0 // No tolerance - immediate activation
       },
     }),
     useSensor(KeyboardSensor)

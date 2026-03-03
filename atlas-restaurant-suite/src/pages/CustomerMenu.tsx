@@ -54,18 +54,25 @@ const SortableMenuItemRow: React.FC<{
       {...attributes}
       {...listeners}
       className={cn(
-        'relative cursor-grab active:cursor-grabbing touch-manipulation',
+        'relative cursor-grab active:cursor-grabbing',
         isDragging && 'ring-2 ring-primary/30 rounded-2xl z-50 opacity-90',
         // Prevent drag when interacting with buttons
-        '[&_button]:pointer-events-auto [&_button]:z-20'
+        '[&_button]:pointer-events-auto [&_button]:z-20 [&_button]:touch-action-manipulation'
       )}
+      style={{
+        touchAction: 'none', // Enable drag on touch devices
+        WebkitTouchCallout: 'none', // Disable iOS callout
+        WebkitUserSelect: 'none', // Disable text selection
+        userSelect: 'none',
+      }}
       onTouchStart={(e) => {
         // Allow drag on touch devices - buttons will still work due to pointer-events-auto
         const target = e.target as HTMLElement;
-        if (target.closest('button')) {
-          // Don't prevent default for buttons
+        if (target.closest('button') || target.closest('input')) {
+          // Don't prevent default for buttons and inputs
           return;
         }
+        // Enable drag for the element itself
       }}
     >
       <MenuItemCard
@@ -200,11 +207,11 @@ const CustomerMenu: React.FC = () => {
       activationConstraint: { distance: 8 },
     }),
     useSensor(TouchSensor, {
-      // Optimized for mobile: lower activation distance, allow immediate drag
+      // Optimized for mobile: very low activation distance for immediate drag
       activationConstraint: { 
-        distance: 5, // Smaller distance for touch devices
+        distance: 3, // Very small distance for immediate drag on touch devices
         delay: 0, // No delay for immediate response
-        tolerance: 5 // Tolerance for touch movement
+        tolerance: 0 // No tolerance - immediate activation
       },
     })
   );
@@ -776,22 +783,22 @@ const CustomerMenu: React.FC = () => {
             )}
             <div className="flex items-center justify-between gap-2 sm:gap-3">
               <div className="flex items-center gap-2 sm:gap-3 md:gap-4 min-w-0 flex-1">
-                <Button
-                  size="icon"
-                  variant="ghost"
+              <Button
+                size="icon"
+                variant="ghost"
                   className="h-9 w-9 sm:h-10 sm:w-10 md:h-11 md:w-11 rounded-xl hover:bg-secondary/60 active:scale-95 transition-all touch-manipulation flex-shrink-0 shadow-sm"
                   onClick={() => navigate(-1)}
                   aria-label="Go back"
-                >
+              >
                   <ArrowLeft className="h-4 w-4 sm:h-4.5 sm:w-4.5 md:h-5 md:w-5" />
-                </Button>
+              </Button>
                 <div className="min-w-0 flex-1">
                   <h1 className="font-display text-lg sm:text-xl md:text-2xl font-semibold text-foreground tracking-tight truncate">
-                    ATLAS HOUSE
-                  </h1>
+                  ATLAS HOUSE
+                </h1>
                   <p className="text-[10px] sm:text-xs text-muted-foreground/80 mt-0.5 font-medium tracking-wider uppercase truncate">
-                    {tableId.replace('_', ' ')}
-                  </p>
+                  {tableId.replace('_', ' ')}
+                </p>
                 </div>
               </div>
               
@@ -821,9 +828,9 @@ const CustomerMenu: React.FC = () => {
                   </div>
                 </div>
               )}
-            </div>
           </div>
-        </header>
+        </div>
+      </header>
 
         {/* Menu - Luxury Design */}
         <main className="max-w-3xl mx-auto px-3 sm:px-5 md:px-6 py-3 sm:py-5 md:py-6">
@@ -873,7 +880,7 @@ const CustomerMenu: React.FC = () => {
                     <span className="text-2xl sm:text-3xl md:text-4xl leading-none">{categoryEmoji}</span>
                     <h2 className="font-display text-lg sm:text-xl md:text-2xl font-semibold text-foreground tracking-tight">
                       {categoryName}
-                    </h2>
+              </h2>
                     <span className="text-xs sm:text-sm text-muted-foreground/70 font-medium px-2 py-0.5 rounded-full bg-muted/30">
                       {items.length}
                     </span>
@@ -900,11 +907,11 @@ const CustomerMenu: React.FC = () => {
                           quantity={getItemQuantity(item!.id)}
                           onAdd={() => handleAddItem(item!)}
                           onRemove={() => handleRemoveItem(item!.id)}
-                          disabled={session.isLocked}
+                    disabled={session.isLocked}
                           isLoading={loadingItems.has(item!.id)}
-                        />
-                      ))}
-                  </div>
+                  />
+                ))}
+              </div>
                 </SortableContext>
             </section>
             );
@@ -919,7 +926,7 @@ const CustomerMenu: React.FC = () => {
             </div>
           ) : null}
         </DragOverlay>
-        </main>
+      </main>
 
       {/* Fixed Bottom Actions - Luxury Design */}
       <div 
@@ -1059,7 +1066,7 @@ const CustomerMenu: React.FC = () => {
         tableId={tableId}
         googlePlaceId={import.meta.env.VITE_GOOGLE_PLACE_ID}
       />
-      </div>
+    </div>
     </DndContext>
   );
 };

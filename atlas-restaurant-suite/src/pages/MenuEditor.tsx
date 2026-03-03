@@ -68,15 +68,22 @@ const DraggableAvailableItem: React.FC<{
   return (
     <div
       ref={setNodeRef}
-      style={style}
+      style={{
+        ...style,
+        touchAction: 'none', // Enable drag on touch devices
+        WebkitTouchCallout: 'none', // Disable iOS callout
+        WebkitUserSelect: 'none', // Disable text selection
+        userSelect: 'none',
+      }}
       {...attributes}
       {...listeners}
-      className="flex items-center justify-between p-2.5 sm:p-3 border rounded hover:bg-secondary/50 gap-2 cursor-grab active:cursor-grabbing touch-manipulation min-h-[60px] [&_button]:pointer-events-auto [&_button]:z-20"
+      className="flex items-center justify-between p-2.5 sm:p-3 border rounded hover:bg-secondary/50 gap-2 cursor-grab active:cursor-grabbing min-h-[60px] [&_button]:pointer-events-auto [&_button]:z-20 [&_button]:touch-action-manipulation"
       onTouchStart={(e) => {
         const target = e.target as HTMLElement;
         if (target.closest('button') || target.closest('input')) {
           return;
         }
+        // Enable drag for the element itself
       }}
     >
       <div className="flex-1 min-w-0">
@@ -148,15 +155,22 @@ const SortableDailyItem: React.FC<{
   return (
     <div
       ref={setNodeRef}
-      style={style}
+      style={{
+        ...style,
+        touchAction: 'none', // Enable drag on touch devices
+        WebkitTouchCallout: 'none', // Disable iOS callout
+        WebkitUserSelect: 'none', // Disable text selection
+        userSelect: 'none',
+      }}
       {...attributes}
       {...listeners}
-      className="flex items-center justify-between p-2.5 sm:p-3 border rounded hover:bg-secondary/50 gap-2 cursor-grab active:cursor-grabbing touch-manipulation min-h-[60px] [&_button]:pointer-events-auto [&_button]:z-20"
+      className="flex items-center justify-between p-2.5 sm:p-3 border rounded hover:bg-secondary/50 gap-2 cursor-grab active:cursor-grabbing min-h-[60px] [&_button]:pointer-events-auto [&_button]:z-20 [&_button]:touch-action-manipulation [&_input]:touch-action-manipulation"
       onTouchStart={(e) => {
         const target = e.target as HTMLElement;
         if (target.closest('button') || target.closest('input')) {
           return;
         }
+        // Enable drag for the element itself
       }}
     >
       <div className="flex-1 min-w-0">
@@ -167,6 +181,7 @@ const SortableDailyItem: React.FC<{
             className="h-9 sm:h-10 text-sm sm:text-base"
             autoFocus
             onClick={(e) => e.stopPropagation()}
+            style={{ touchAction: 'manipulation' }}
           />
         ) : (
           <>
@@ -250,14 +265,20 @@ const DraggableMenuItem: React.FC<{
   return (
     <div
       ref={setNodeRef}
-      style={style}
+      style={!isBulkMode ? {
+        ...style,
+        touchAction: 'none', // Enable drag on touch devices
+        WebkitTouchCallout: 'none', // Disable iOS callout
+        WebkitUserSelect: 'none', // Disable text selection
+        userSelect: 'none',
+      } : style}
       {...(!isBulkMode ? attributes : {})}
       {...(!isBulkMode ? listeners : {})}
       className={`bg-card border rounded-lg p-2.5 sm:p-3 md:p-4 flex items-center justify-between transition-all duration-200 ${
         isSelected ? 'border-primary bg-primary/5 shadow-sm' : 'border-border hover:border-primary/30 hover:shadow-sm'
-      } ${isBulkMode ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing touch-manipulation min-h-[60px]'} ${
+      } ${isBulkMode ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing min-h-[60px]'} ${
         isDragging ? 'shadow-lg ring-2 ring-primary/20 opacity-90' : ''
-      } ${!isBulkMode ? '[&_button]:pointer-events-auto [&_button]:z-20' : ''}`}
+      } ${!isBulkMode ? '[&_button]:pointer-events-auto [&_button]:z-20 [&_button]:touch-action-manipulation' : ''}`}
       onClick={isBulkMode && onToggleSelect ? () => onToggleSelect(item.id) : undefined}
       onTouchStart={!isBulkMode ? (e) => {
         // Allow drag on touch devices - buttons will still work due to pointer-events-auto
@@ -266,6 +287,7 @@ const DraggableMenuItem: React.FC<{
           // Don't prevent default for buttons and inputs
           return;
         }
+        // Enable drag for the element itself
       } : undefined}
     >
       <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
@@ -527,11 +549,11 @@ const MenuEditor: React.FC = () => {
       },
     }),
     useSensor(TouchSensor, {
-      // Optimized for mobile: lower activation distance, allow immediate drag
+      // Optimized for mobile: very low activation distance for immediate drag
       activationConstraint: { 
-        distance: 5, // Smaller distance for touch devices
+        distance: 3, // Very small distance for immediate drag on touch devices
         delay: 0, // No delay for immediate response
-        tolerance: 5 // Tolerance for touch movement
+        tolerance: 0 // No tolerance - immediate activation
       },
     }),
     useSensor(KeyboardSensor)
