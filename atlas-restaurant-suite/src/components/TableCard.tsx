@@ -22,7 +22,7 @@ const TableCard: React.FC<TableCardProps> = ({
   completingRequests = new Set(),
 }) => {
   // Memoize calculations for performance
-  const { pendingRequests, completedRequests, hasPending, hasActionablePending, hasActivity, billPaid, totalBill, status } = useMemo(() => {
+  const { pendingRequests, completedRequests, hasPending, hasActionablePending, hasActivity, billPaid, totalBill, status, hasBillRequest } = useMemo(() => {
     // Show both pending and confirmed requests in the list
     const pending = session.requests.filter(r => r.status === 'pending' || r.status === 'confirmed');
     const completed = session.requests.filter(r => r.status === 'completed');
@@ -39,6 +39,11 @@ const TableCard: React.FC<TableCardProps> = ({
   const billPaid = session.requests.some(
     r => r.action === '💳 BILL REQUEST' && r.status === 'completed'
   );
+  // Check if there's a payment/bill request (pending or confirmed)
+  const hasBillRequest = session.requests.some(
+    r => (r.requestType === 'bill' || r.action.includes('BILL') || r.action.includes('Сметка')) && 
+         (r.status === 'pending' || r.status === 'confirmed')
+  );
   const totalBill = session.requests.reduce((sum, r) => sum + r.total, 0);
 
     let status: 'free' | 'occupied' | 'alert';
@@ -48,7 +53,7 @@ const TableCard: React.FC<TableCardProps> = ({
     else if (hasActivity) status = 'occupied';
     else status = 'free';
     
-    return { pendingRequests: pending, completedRequests: completed, hasPending, hasActionablePending, hasActivity, billPaid, totalBill, status };
+    return { pendingRequests: pending, completedRequests: completed, hasPending, hasActionablePending, hasActivity, billPaid, totalBill, status, hasBillRequest };
   }, [session.requests]);
 
   return (
@@ -70,18 +75,18 @@ const TableCard: React.FC<TableCardProps> = ({
         </div>
         
         <div className="flex items-center gap-2 flex-shrink-0">
-          {hasActionablePending && !session.isLocked && (
-          <Button
-            size="sm"
+          {hasBillRequest && !session.isLocked && (
+            <Button
+              size="sm"
               className="btn-gold text-xs h-8 sm:h-9 px-2 sm:px-3 touch-manipulation"
               onClick={onMarkAsPaid}
               aria-label={`Mark ${session.tableId} as paid`}
-          >
+            >
               <CheckCircle2 className="h-4 w-4 sm:mr-1" />
               <span className="hidden sm:inline">Платено</span>
               <span className="sm:hidden">✓</span>
-          </Button>
-        )}
+            </Button>
+          )}
         </div>
       </div>
 
