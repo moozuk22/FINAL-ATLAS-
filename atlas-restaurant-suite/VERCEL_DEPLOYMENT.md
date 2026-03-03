@@ -1,5 +1,23 @@
 # Vercel Deployment Guide
 
+Complete guide for deploying the ATLAS HOUSE restaurant management system to Vercel.
+
+## Prerequisites
+
+- Vercel account
+- Supabase project with database tables set up
+- Git repository connected to Vercel
+
+## ⚠️ IMPORTANT: Database Setup Required First
+
+**Before deploying, you must create the database tables in your Supabase project.**
+
+1. Go to your Supabase Dashboard
+2. Navigate to **SQL Editor** → **New Query**
+3. Copy and paste the contents of `scripts/setup-new-supabase.sql`
+4. Click **Run** to execute the SQL
+5. Wait 2-5 minutes for PostgREST to refresh its schema cache
+
 ## Configuration
 
 This is a **Vite + React** application, not Next.js.
@@ -11,37 +29,91 @@ This is a **Vite + React** application, not Next.js.
 3. **Output Directory**: `dist`
 4. **Install Command**: `npm install`
 
-### Environment Variables
+### Environment Variables Setup
 
-Make sure these are set in Vercel Dashboard → Settings → Environment Variables:
+Add these environment variables in your Vercel project settings:
 
-- `VITE_SUPABASE_URL` = `https://wicufyfrkaigjhirdgeu.supabase.co`
-- `VITE_SUPABASE_ANON_KEY` = `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpY3VmeWZya2FpZ2poaXJkZ2V1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk4ODMzMjcsImV4cCI6MjA4NTQ1OTMyN30.lqKJho15EnaohIhEtAq2TeISYhHHQvX-LdV9d9SETAc`
+1. Go to your Vercel project dashboard
+2. Navigate to **Settings** → **Environment Variables**
+3. Add the following variables for **Production**, **Preview**, and **Development**:
 
-### Troubleshooting
+#### Required Variables
 
-If the app is not loading:
+- **Name:** `VITE_SUPABASE_URL`
+- **Value:** `https://wicufyfrkaigjhirdgeu.supabase.co`
 
-1. **Check Build Logs**: Go to Vercel Dashboard → Deployments → Click on latest deployment → View build logs
-2. **Check Runtime Logs**: Go to Vercel Dashboard → Deployments → Functions → Check for errors
-3. **Verify Environment Variables**: Make sure all `VITE_*` variables are set
-4. **Clear Cache**: In Vercel Dashboard → Settings → Clear Build Cache → Redeploy
+- **Name:** `VITE_SUPABASE_ANON_KEY`
+- **Value:** `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpY3VmeWZya2FpZ2poaXJkZ2V1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk4ODMzMjcsImV4cCI6MjA4NTQ1OTMyN30.lqKJho15EnaohIhEtAq2TeISYhHHQvX-LdV9d9SETAc`
 
-### Common Issues
+### After Adding Variables
 
-**Issue**: White screen / App not loading
-- **Solution**: Check browser console for errors. Usually missing environment variables or build errors.
+1. **Redeploy** your application in Vercel
+2. The app will automatically use these environment variables
+3. Check the browser console for Supabase connection logs
 
-**Issue**: 404 on routes
-- **Solution**: The `vercel.json` should have the rewrite rule (already configured).
+## Deployment Steps
 
-**Issue**: React undefined errors
-- **Solution**: This was fixed in the latest commit. Make sure you're on the latest version.
+### 1. Connect Repository
 
-**Issue**: Supabase connection errors
-- **Solution**: Verify `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are set correctly.
+1. Import your Git repository to Vercel
+2. Vercel will auto-detect the framework (Vite)
 
-### Manual Deployment Steps
+### 2. Configure Build Settings
+
+Vercel should auto-detect these settings from `vercel.json`:
+- **Build Command**: `npm run build`
+- **Output Directory**: `dist`
+- **Install Command**: `npm install`
+
+### 3. Deploy
+
+1. Push to your main branch
+2. Vercel will automatically deploy
+3. Check deployment logs for any errors
+
+## Troubleshooting
+
+### Build Failures
+
+1. Check build logs in Vercel dashboard
+2. Verify environment variables are set correctly
+3. Ensure `package.json` has all dependencies
+4. Check for TypeScript errors: `npm run type-check`
+
+### Runtime Errors
+
+#### White Screen / App Not Loading
+- Check browser console for errors
+- Usually missing environment variables or build errors
+- Verify `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are set
+
+#### 404 on Routes
+- The `vercel.json` should have the rewrite rule (already configured)
+- Verify routing configuration
+
+#### Supabase Connection Errors
+- Verify `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are set correctly
+- Check that database tables exist in Supabase
+- Wait 2-5 minutes after creating tables for schema cache refresh
+
+### 404 Errors / PGRST205 Schema Cache Errors
+
+If you see errors like `"Could not find the table 'public.menu_items' in the schema cache"`:
+
+1. **Wait 2-5 minutes** - PostgREST automatically refreshes its schema cache, but there can be a delay after creating tables
+2. **Check Supabase Dashboard** - Go to your Supabase project → Settings → API → verify tables are listed
+3. **Verify Environment Variables** - Ensure `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are set correctly in Vercel
+4. **Check Project URL** - Make sure you're using the correct Supabase project URL (should match where tables were created)
+5. **Manual Refresh** - In Supabase Dashboard, go to Database → try making a small change to trigger schema reload
+
+### Other Common Issues
+
+- **RLS errors**: Check that Row Level Security policies allow public access
+- **Connection errors**: Verify the Supabase project is active and not paused
+- **Check browser console** for detailed error messages
+- **Clear Cache**: In Vercel Dashboard → Settings → Clear Build Cache → Redeploy
+
+## Manual Deployment Steps
 
 1. Go to Vercel Dashboard
 2. Select your project
