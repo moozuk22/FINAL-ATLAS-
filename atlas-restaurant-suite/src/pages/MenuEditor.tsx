@@ -294,18 +294,18 @@ const DraggableMenuItem: React.FC<{
         <Button
           size="icon"
           variant="ghost"
-          className="h-8 w-8 sm:h-9 sm:w-9"
+          className="h-9 w-9 sm:h-10 sm:w-10 touch-manipulation"
           onClick={() => onEdit(item)}
         >
-          <Edit2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+          <Edit2 className="h-4 w-4 sm:h-5 sm:w-5" />
         </Button>
         <Button
           size="icon"
           variant="ghost"
-          className="h-8 w-8 sm:h-9 sm:w-9 text-destructive hover:text-destructive"
+          className="h-9 w-9 sm:h-10 sm:w-10 text-destructive hover:text-destructive touch-manipulation"
           onClick={() => onDelete(item.id)}
         >
-          <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+          <Trash2 className="h-4 w-4 sm:h-5 sm:w-5" />
         </Button>
       </div>
     </div>
@@ -352,15 +352,15 @@ const CategorySection: React.FC<{
   return (
     <section
       ref={setNodeRef}
-      className={`rounded-xl p-4 transition-all duration-200 ${
+      className={`rounded-xl p-2.5 sm:p-3 md:p-4 transition-all duration-200 ${
         isOver 
           ? 'bg-primary/10 border-2 border-primary border-dashed shadow-md' 
           : 'bg-gradient-to-br from-background to-muted/20 border border-border/50'
       }`}
     >
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-3 sm:mb-4 gap-2">
         {isEditing ? (
-          <div className="flex items-center gap-2 flex-1">
+          <div className="flex items-center gap-2 flex-1 min-w-0">
             <Input
               value={editValue}
               onChange={(e) => setEditValue(e.target.value)}
@@ -368,38 +368,38 @@ const CategorySection: React.FC<{
                 if (e.key === 'Enter') handleSaveRename();
                 if (e.key === 'Escape') handleCancelRename();
               }}
-              className="text-xl font-semibold"
+              className="text-base sm:text-lg md:text-xl font-semibold h-10 sm:h-11 touch-manipulation"
               autoFocus
             />
-            <Button size="sm" onClick={handleSaveRename}>
-              <Save className="h-4 w-4" />
+            <Button size="sm" onClick={handleSaveRename} className="h-10 w-10 sm:h-11 sm:w-11 p-0 touch-manipulation flex-shrink-0">
+              <Save className="h-4 w-4 sm:h-5 sm:w-5" />
             </Button>
-            <Button size="sm" variant="outline" onClick={handleCancelRename}>
-              <X className="h-4 w-4" />
+            <Button size="sm" variant="outline" onClick={handleCancelRename} className="h-10 w-10 sm:h-11 sm:w-11 p-0 touch-manipulation flex-shrink-0">
+              <X className="h-4 w-4 sm:h-5 sm:w-5" />
             </Button>
           </div>
         ) : (
           <>
             <h2 
-              className="text-base sm:text-lg md:text-xl font-semibold text-foreground flex items-center gap-2 sm:gap-3 bg-primary/5 px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 rounded-lg border border-primary/10 cursor-pointer hover:bg-primary/10 transition-colors group"
+              className="text-sm sm:text-base md:text-lg lg:text-xl font-semibold text-foreground flex items-center gap-1.5 sm:gap-2 md:gap-3 bg-primary/5 px-2 sm:px-3 md:px-4 py-2 sm:py-2.5 rounded-lg border border-primary/10 cursor-pointer hover:bg-primary/10 transition-colors group touch-manipulation min-h-[44px] flex-1 min-w-0"
               onClick={() => !isUnassigned && setIsEditing(true)}
               title={!isUnassigned ? "Click to rename category" : undefined}
             >
-              <span className="text-lg sm:text-xl md:text-2xl flex-shrink-0">{categoryEmoji}</span>
+              <span className="text-base sm:text-lg md:text-xl lg:text-2xl flex-shrink-0">{categoryEmoji}</span>
               <span className="flex-1 min-w-0 truncate">{categoryName}</span>
-              <span className="text-xs sm:text-sm font-normal text-muted-foreground flex-shrink-0">
+              <span className="text-[10px] sm:text-xs md:text-sm font-normal text-muted-foreground flex-shrink-0 hidden sm:inline">
                 ({items.length} {items.length === 1 ? 'item' : 'items'})
               </span>
-              {isOver && <span className="ml-1 sm:ml-2 text-xs sm:text-sm text-primary font-medium animate-pulse flex-shrink-0">(Drop here)</span>}
+              {isOver && <span className="ml-1 sm:ml-2 text-[10px] sm:text-xs md:text-sm text-primary font-medium animate-pulse flex-shrink-0">(Drop here)</span>}
               {!isUnassigned && (
-                <Edit2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+                <Edit2 className="h-4 w-4 sm:h-5 sm:w-5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 hidden sm:block" />
               )}
             </h2>
             {!isUnassigned && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-8 w-8">
-                    <MoreVertical className="h-4 w-4" />
+                  <Button variant="ghost" size="icon" className="h-10 w-10 sm:h-11 sm:w-11 touch-manipulation flex-shrink-0">
+                    <MoreVertical className="h-5 w-5 sm:h-6 sm:w-6" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
@@ -428,12 +428,12 @@ const CategorySection: React.FC<{
       </div>
       <SortableContext items={items.map(i => i.id)} strategy={verticalListSortingStrategy}>
         {items.length === 0 ? (
-          <div className="text-center py-12 text-muted-foreground border-2 border-dashed rounded-lg border-border/50 bg-muted/5">
-            <p className="text-sm font-medium mb-1">No items in this category</p>
-            <p className="text-xs">Drag items here to add them</p>
+          <div className="text-center py-8 sm:py-12 text-muted-foreground border-2 border-dashed rounded-lg border-border/50 bg-muted/5">
+            <p className="text-xs sm:text-sm font-medium mb-1">No items in this category</p>
+            <p className="text-[10px] sm:text-xs">Drag items here to add them</p>
           </div>
         ) : (
-          <div className="space-y-2 animate-in fade-in duration-300">
+          <div className="space-y-2 sm:space-y-2.5 animate-in fade-in duration-300">
             {items.map(item => (
               <DraggableMenuItem
                 key={item.id}
