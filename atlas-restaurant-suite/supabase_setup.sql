@@ -1,4 +1,4 @@
--- Run this SQL in your Supabase SQL Editor for project: wicufyfrkaigjhirdgeu
+-- Run this SQL in your Supabase SQL Editor for project: zqnyugoudabtqieuqhrp
 -- Go to: Supabase Dashboard → SQL Editor → New Query → Paste this → Run
 
 -- Create menu_items table

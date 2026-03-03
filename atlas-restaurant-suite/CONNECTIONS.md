@@ -3,7 +3,7 @@
 ## 1. Database Connection (Supabase)
 
 ### Connection Details
-- **URL**: `https://wicufyfrkaigjhirdgeu.supabase.co`
+- **URL**: `https://zqnyugoudabtqieuqhrp.supabase.co`
 - **Client**: `@supabase/supabase-js`
 - **Configuration**: `src/lib/supabase.ts`
 - **Environment Variables**:
@@ -162,8 +162,8 @@
 ## 6. Environment Variables Required
 
 ```env
-VITE_SUPABASE_URL=https://wicufyfrkaigjhirdgeu.supabase.co
-VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+VITE_SUPABASE_URL=https://zqnyugoudabtqieuqhrp.supabase.co
+VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpxbnl1Z291ZGFidHFpZXVxaHJwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1NTAzMDQsImV4cCI6MjA4ODEyNjMwNH0.ahoHNU_-3y0rVWOuXGOb8fUoOfA5bjuPABHCrDzvgLc
 VITE_GOOGLE_PLACE_ID=your_google_place_id
 ```
 
