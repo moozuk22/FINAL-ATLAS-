@@ -369,7 +369,7 @@ const CartDrawer: React.FC<CartDrawerProps> = ({
     useSensor(TouchSensor, {
       // Optimized for mobile: very low activation distance for immediate drag
       activationConstraint: { 
-        distance: 3, // Very small distance for immediate drag on touch devices
+        distance: 0.1, // Almost immediate drag activation on touch devices
         delay: 0, // No delay for immediate response
         tolerance: 0 // No tolerance - immediate activation
       },
