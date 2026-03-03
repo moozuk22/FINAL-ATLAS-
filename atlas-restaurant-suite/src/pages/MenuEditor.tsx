@@ -90,7 +90,7 @@ const DraggableAvailableItem: React.FC<{
           e.stopPropagation();
           onAdd();
         }}
-        className="ml-1 sm:ml-2 text-xs sm:text-sm h-7 sm:h-8 px-2 sm:px-3 flex-shrink-0"
+        className="ml-1 sm:ml-2 text-xs sm:text-sm h-9 sm:h-10 px-3 sm:px-4 flex-shrink-0 touch-manipulation min-w-[60px]"
       >
         Добави
       </Button>
@@ -110,11 +110,11 @@ const DailyDropZone: React.FC<{
     <div
       ref={setNodeRef}
       className={cn(
-        'border rounded-lg p-3 sm:p-4 overflow-y-auto max-h-[60vh] sm:max-h-[70vh] transition-all',
+        'border rounded-lg p-2.5 sm:p-3 md:p-4 overflow-y-auto max-h-[65vh] sm:max-h-[70vh] transition-all',
         isOver && 'ring-2 ring-primary/30 border-primary/50 bg-primary/5'
       )}
     >
-      <h3 className="font-semibold mb-3">{title}</h3>
+      <h3 className="font-semibold text-sm sm:text-base mb-2 sm:mb-3">{title}</h3>
       {children}
     </div>
   );
@@ -151,7 +151,7 @@ const SortableDailyItem: React.FC<{
       style={style}
       {...attributes}
       {...listeners}
-      className="flex items-center justify-between p-2 sm:p-2.5 border rounded hover:bg-secondary/50 gap-2 cursor-grab active:cursor-grabbing touch-manipulation [&_button]:pointer-events-auto [&_button]:z-20"
+      className="flex items-center justify-between p-2.5 sm:p-3 border rounded hover:bg-secondary/50 gap-2 cursor-grab active:cursor-grabbing touch-manipulation min-h-[44px] [&_button]:pointer-events-auto [&_button]:z-20"
       onTouchStart={(e) => {
         const target = e.target as HTMLElement;
         if (target.closest('button') || target.closest('input')) {
@@ -164,7 +164,7 @@ const SortableDailyItem: React.FC<{
           <Input
             value={editText}
             onChange={(e) => onEditTextChange(e.target.value)}
-            className="h-7 sm:h-8 text-xs sm:text-sm"
+            className="h-9 sm:h-10 text-sm sm:text-base"
             autoFocus
             onClick={(e) => e.stopPropagation()}
           />
@@ -175,7 +175,7 @@ const SortableDailyItem: React.FC<{
           </>
         )}
       </div>
-      <div className="flex items-center gap-1 sm:gap-1.5 ml-1 sm:ml-2 flex-shrink-0">
+      <div className="flex items-center gap-1.5 sm:gap-2 ml-1 sm:ml-2 flex-shrink-0">
         {isEditing ? (
           <Button
             size="sm"
@@ -184,9 +184,9 @@ const SortableDailyItem: React.FC<{
               e.stopPropagation();
               onCancelEdit();
             }}
-            className="h-7 w-7 sm:h-8 sm:w-8 p-0"
+            className="h-9 w-9 sm:h-10 sm:w-10 p-0 touch-manipulation"
           >
-            <X className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            <X className="h-4 w-4 sm:h-5 sm:w-5" />
           </Button>
         ) : (
           <>
@@ -197,10 +197,10 @@ const SortableDailyItem: React.FC<{
                 e.stopPropagation();
                 onEdit();
               }}
-              className="h-7 w-7 sm:h-8 sm:w-8 p-0"
+              className="h-9 w-9 sm:h-10 sm:w-10 p-0 touch-manipulation"
               title="Редактирай"
             >
-              <Edit2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+              <Edit2 className="h-4 w-4 sm:h-5 sm:w-5" />
             </Button>
             <Button
               size="sm"
@@ -209,10 +209,10 @@ const SortableDailyItem: React.FC<{
                 e.stopPropagation();
                 onRemove();
               }}
-              className="h-7 w-7 sm:h-8 sm:w-8 p-0 text-destructive"
+              className="h-9 w-9 sm:h-10 sm:w-10 p-0 text-destructive touch-manipulation"
               title="Премахни"
             >
-              <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+              <Trash2 className="h-4 w-4 sm:h-5 sm:w-5" />
             </Button>
           </>
         )}
@@ -1249,10 +1249,10 @@ const MenuEditor: React.FC = () => {
               <Button
                 size="icon"
                 variant="ghost"
-                className="h-8 w-8 sm:h-9 sm:w-9 rounded-lg hover:bg-secondary flex-shrink-0"
+                className="h-10 w-10 sm:h-11 sm:w-11 rounded-lg hover:bg-secondary flex-shrink-0 touch-manipulation"
                 onClick={() => navigate('/admin')}
               >
-                <ArrowLeft className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
               </Button>
               <div className="min-w-0 flex-1">
                 <h1 className="text-lg sm:text-xl md:text-2xl font-semibold text-foreground truncate">
@@ -1278,7 +1278,7 @@ const MenuEditor: React.FC = () => {
                       }
                     }}
                     disabled={selectedItems.size === 0}
-                    className="text-xs sm:text-sm h-8 sm:h-9 px-2 sm:px-3"
+                    className="text-xs sm:text-sm h-10 sm:h-11 px-3 sm:px-4 touch-manipulation"
                   >
                     <span className="hidden sm:inline">Move Selected </span>
                     <span className="sm:hidden">Move</span>
@@ -1291,7 +1291,7 @@ const MenuEditor: React.FC = () => {
                       setIsBulkMode(false);
                       setSelectedItems(new Set());
                     }}
-                    className="text-xs sm:text-sm h-8 sm:h-9 px-2 sm:px-3"
+                    className="text-xs sm:text-sm h-10 sm:h-11 px-3 sm:px-4 touch-manipulation"
                   >
                     Cancel
                   </Button>
@@ -1300,9 +1300,9 @@ const MenuEditor: React.FC = () => {
                 <Button
                   variant="outline"
                   onClick={() => setIsBulkMode(true)}
-                  className="gap-1 sm:gap-2 text-xs sm:text-sm h-8 sm:h-9 px-2 sm:px-3"
+                  className="gap-1 sm:gap-2 text-xs sm:text-sm h-10 sm:h-11 px-3 sm:px-4 touch-manipulation"
                 >
-                  <CheckSquare className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                  <CheckSquare className="h-4 w-4 sm:h-5 sm:w-5" />
                   <span className="hidden sm:inline">Bulk Select</span>
                   <span className="sm:hidden">Select</span>
                 </Button>
@@ -1321,10 +1321,10 @@ const MenuEditor: React.FC = () => {
                         setNewCategoryName('');
                       }
                     }}
-                    className="w-full sm:w-40 md:w-48 h-8 sm:h-9 text-xs sm:text-sm"
+                    className="w-full sm:w-40 md:w-48 h-10 sm:h-11 text-sm sm:text-base touch-manipulation"
                     autoFocus
                   />
-                  <Button size="sm" onClick={handleCreateCategory} className="h-8 sm:h-9 px-2 sm:px-3 text-xs sm:text-sm">
+                  <Button size="sm" onClick={handleCreateCategory} className="h-10 sm:h-11 px-3 sm:px-4 text-sm sm:text-base touch-manipulation">
                     Create
                   </Button>
                   <Button
@@ -1334,7 +1334,7 @@ const MenuEditor: React.FC = () => {
                       setShowNewCategoryInput(false);
                       setNewCategoryName('');
                     }}
-                    className="h-8 sm:h-9 px-2 sm:px-3 text-xs sm:text-sm"
+                    className="h-10 sm:h-11 px-3 sm:px-4 text-sm sm:text-base touch-manipulation"
                   >
                     Cancel
                   </Button>
@@ -1352,8 +1352,8 @@ const MenuEditor: React.FC = () => {
               )}
               <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
                 <DialogTrigger asChild>
-                  <Button onClick={handleAddNew} className="gap-1 sm:gap-2 text-xs sm:text-sm h-8 sm:h-9 px-2 sm:px-3">
-                    <Plus className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                  <Button onClick={handleAddNew} className="gap-1 sm:gap-2 text-xs sm:text-sm h-10 sm:h-11 px-3 sm:px-4 touch-manipulation">
+                    <Plus className="h-4 w-4 sm:h-5 sm:w-5" />
                     <span className="hidden sm:inline">Add Item</span>
                     <span className="sm:hidden">Add</span>
                   </Button>
@@ -1424,11 +1424,11 @@ const MenuEditor: React.FC = () => {
       </header>
 
       {/* Menu Items - Mobile Optimized */}
-      <main className="max-w-6xl mx-auto px-3 sm:px-4 md:px-6 py-4 sm:py-6 md:py-8">
+      <main className="max-w-6xl mx-auto px-2.5 sm:px-4 md:px-6 py-3 sm:py-5 md:py-7">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full max-w-md grid-cols-2 mb-4 sm:mb-6 h-9 sm:h-10">
-            <TabsTrigger value="edit" className="text-xs sm:text-sm">Редактирай меню</TabsTrigger>
-            <TabsTrigger value="daily" className="text-xs sm:text-sm">Меню за деня</TabsTrigger>
+          <TabsList className="grid w-full max-w-md grid-cols-2 mb-4 sm:mb-6 h-11 sm:h-12 touch-manipulation">
+            <TabsTrigger value="edit" className="text-sm sm:text-base touch-manipulation">Редактирай меню</TabsTrigger>
+            <TabsTrigger value="daily" className="text-sm sm:text-base touch-manipulation">Меню за деня</TabsTrigger>
           </TabsList>
 
           <TabsContent value="edit" className="mt-0">
@@ -1514,19 +1514,24 @@ const MenuEditor: React.FC = () => {
               onDragEnd={handleDailyDragEnd}
             >
               <div className="space-y-4">
-                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4 mb-4">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 sm:gap-4 mb-4">
                   <Input
                     type="date"
                     value={selectedDate}
                     onChange={(e) => setSelectedDate(e.target.value)}
-                    className="w-full sm:w-auto text-xs sm:text-sm"
+                    className="w-full sm:w-auto text-sm sm:text-base h-10 sm:h-11 touch-manipulation"
                   />
-                  <Button onClick={loadDailyMenu} disabled={dailyMenuLoading} variant="outline" className="w-full sm:w-auto text-xs sm:text-sm h-8 sm:h-9">
+                  <Button 
+                    onClick={loadDailyMenu} 
+                    disabled={dailyMenuLoading} 
+                    variant="outline" 
+                    className="w-full sm:w-auto text-sm sm:text-base h-10 sm:h-11 px-4 sm:px-6 touch-manipulation"
+                  >
                     Зареди
                   </Button>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
                   {/* All Items Column */}
                   <DailyDropZone id="available-items-drop" title="Всички артикули">
                     {dailyMenuLoading ? (
