@@ -84,16 +84,16 @@ const SortableCartItem: React.FC<{
       className={cn(
         'bg-card border border-border rounded-lg p-3 sm:p-4 transition-all',
         'hover:border-primary/30 hover:shadow-md',
-        isDragging && 'shadow-lg ring-2 ring-primary/20 z-50',
-        'cursor-grab active:cursor-grabbing touch-manipulation',
+        isDragging && 'shadow-lg ring-2 ring-primary/20 z-50 opacity-90',
+        'cursor-grab active:cursor-grabbing touch-manipulation min-h-[60px]',
         // Prevent drag when interacting with buttons
         '[&_button]:pointer-events-auto [&_button]:z-20'
       )}
       onTouchStart={(e) => {
         // Allow drag on touch devices - buttons will still work due to pointer-events-auto
         const target = e.target as HTMLElement;
-        if (target.closest('button')) {
-          // Don't prevent default for buttons
+        if (target.closest('button') || target.closest('input')) {
+          // Don't prevent default for buttons and inputs
           return;
         }
       }}
@@ -203,9 +203,16 @@ const SortableOrderedItem: React.FC<{
         'w-full text-left bg-card border border-border/50 rounded-lg p-3 sm:p-4 mb-2 transition-all',
         'hover:border-primary/30 hover:shadow-md hover:bg-card/80',
         'focus:outline-none focus:ring-2 focus:ring-primary/20 focus:ring-offset-2',
-        isDragging && 'shadow-lg ring-2 ring-primary/20 z-50 cursor-grabbing',
-        !isDragging && 'cursor-grab active:cursor-grabbing touch-manipulation'
+        isDragging && 'shadow-lg ring-2 ring-primary/20 z-50 cursor-grabbing opacity-90',
+        !isDragging && 'cursor-grab active:cursor-grabbing touch-manipulation min-h-[60px]'
       )}
+      onTouchStart={(e) => {
+        // Ensure touch events work properly for drag
+        const target = e.target as HTMLElement;
+        if (target.closest('button') || target.closest('input')) {
+          return;
+        }
+      }}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
@@ -262,9 +269,16 @@ const SortableKidsZoneRow: React.FC<{ time?: string }> = ({ time }) => {
       className={cn(
         'bg-card border border-border/50 rounded-lg px-3 py-2.5 sm:px-4 sm:py-3 transition-all',
         'hover:border-primary/30 hover:shadow-sm hover:bg-card/80',
-        isDragging && 'shadow-lg ring-2 ring-primary/20 z-50 cursor-grabbing',
-        !isDragging && 'cursor-grab active:cursor-grabbing touch-manipulation'
+        isDragging && 'shadow-lg ring-2 ring-primary/20 z-50 cursor-grabbing opacity-90',
+        !isDragging && 'cursor-grab active:cursor-grabbing touch-manipulation min-h-[44px]'
       )}
+      onTouchStart={(e) => {
+        // Ensure touch events work properly for drag
+        const target = e.target as HTMLElement;
+        if (target.closest('button') || target.closest('input')) {
+          return;
+        }
+      }}
     >
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2 min-w-0">
@@ -492,7 +506,7 @@ const CartDrawer: React.FC<CartDrawerProps> = ({
               {/* Ordered Items (Read-only with Drag & Drop) */}
               {(ordered.length > 0 || kidsZoneFee > 0) && (
                 <div className="mb-4">
-                  <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                  <h3 className="text-xs sm:text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2 sm:mb-3">
                     Поръчани артикули
                   </h3>
                   <DndContext
@@ -505,7 +519,7 @@ const CartDrawer: React.FC<CartDrawerProps> = ({
                       items={orderedDisplayIds}
                       strategy={verticalListSortingStrategy}
                     >
-                      <div className="space-y-2">
+                      <div className="space-y-2 sm:space-y-2.5">
                         {orderedDisplayIds.map((id) => {
                           if (id === KIDS_ZONE_SORTABLE_ID) {
                             return <SortableKidsZoneRow key={id} time={kidsZoneTime} />;
@@ -542,7 +556,7 @@ const CartDrawer: React.FC<CartDrawerProps> = ({
               {items.length > 0 && (
                 <div>
                   {ordered.length > 0 && (
-                    <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                    <h3 className="text-xs sm:text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2 sm:mb-3">
                       В кошницата
                     </h3>
                   )}
@@ -556,7 +570,7 @@ const CartDrawer: React.FC<CartDrawerProps> = ({
                       items={items.map(item => item.id)}
                       strategy={verticalListSortingStrategy}
                     >
-                      <div className="space-y-3">
+                      <div className="space-y-2.5 sm:space-y-3">
                         {items.map((item) => (
                           <SortableCartItem
                             key={item.id}

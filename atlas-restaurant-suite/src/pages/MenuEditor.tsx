@@ -71,10 +71,10 @@ const DraggableAvailableItem: React.FC<{
       style={style}
       {...attributes}
       {...listeners}
-      className="flex items-center justify-between p-2 sm:p-2.5 border rounded hover:bg-secondary/50 gap-2 cursor-grab active:cursor-grabbing touch-manipulation [&_button]:pointer-events-auto [&_button]:z-20"
+      className="flex items-center justify-between p-2.5 sm:p-3 border rounded hover:bg-secondary/50 gap-2 cursor-grab active:cursor-grabbing touch-manipulation min-h-[60px] [&_button]:pointer-events-auto [&_button]:z-20"
       onTouchStart={(e) => {
         const target = e.target as HTMLElement;
-        if (target.closest('button')) {
+        if (target.closest('button') || target.closest('input')) {
           return;
         }
       }}
@@ -151,7 +151,7 @@ const SortableDailyItem: React.FC<{
       style={style}
       {...attributes}
       {...listeners}
-      className="flex items-center justify-between p-2.5 sm:p-3 border rounded hover:bg-secondary/50 gap-2 cursor-grab active:cursor-grabbing touch-manipulation min-h-[44px] [&_button]:pointer-events-auto [&_button]:z-20"
+      className="flex items-center justify-between p-2.5 sm:p-3 border rounded hover:bg-secondary/50 gap-2 cursor-grab active:cursor-grabbing touch-manipulation min-h-[60px] [&_button]:pointer-events-auto [&_button]:z-20"
       onTouchStart={(e) => {
         const target = e.target as HTMLElement;
         if (target.closest('button') || target.closest('input')) {
@@ -242,7 +242,7 @@ const DraggableMenuItem: React.FC<{
   const style = {
     transform: CSS.Transform.toString(transform),
     transition: isDragging ? 'none' : transition,
-    opacity: isDragging ? 0.4 : 1,
+    opacity: isDragging ? 0.5 : 1,
     scale: isDragging ? 1.05 : 1,
     zIndex: isDragging ? 50 : 1,
   };
@@ -255,15 +255,15 @@ const DraggableMenuItem: React.FC<{
       {...(!isBulkMode ? listeners : {})}
       className={`bg-card border rounded-lg p-2.5 sm:p-3 md:p-4 flex items-center justify-between transition-all duration-200 ${
         isSelected ? 'border-primary bg-primary/5 shadow-sm' : 'border-border hover:border-primary/30 hover:shadow-sm'
-      } ${isBulkMode ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing touch-manipulation'} ${
-        isDragging ? 'shadow-lg ring-2 ring-primary/20' : ''
+      } ${isBulkMode ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing touch-manipulation min-h-[60px]'} ${
+        isDragging ? 'shadow-lg ring-2 ring-primary/20 opacity-90' : ''
       } ${!isBulkMode ? '[&_button]:pointer-events-auto [&_button]:z-20' : ''}`}
       onClick={isBulkMode && onToggleSelect ? () => onToggleSelect(item.id) : undefined}
       onTouchStart={!isBulkMode ? (e) => {
         // Allow drag on touch devices - buttons will still work due to pointer-events-auto
         const target = e.target as HTMLElement;
-        if (target.closest('button')) {
-          // Don't prevent default for buttons
+        if (target.closest('button') || target.closest('input')) {
+          // Don't prevent default for buttons and inputs
           return;
         }
       } : undefined}
@@ -1489,13 +1489,13 @@ const MenuEditor: React.FC = () => {
             </div>
             <DragOverlay>
               {draggedItem ? (
-                <div className="bg-card border-2 border-primary rounded-lg p-4 shadow-lg opacity-90 min-w-[300px]">
+                <div className="bg-card border-2 border-primary rounded-lg p-3 sm:p-4 shadow-lg opacity-90 min-w-[250px] sm:min-w-[300px]">
                   <div className="flex-1">
-                    <h3 className="font-medium text-foreground">{draggedItem.name}</h3>
+                    <h3 className="font-semibold text-sm sm:text-base text-foreground">{stripAllergenNumbersFromName(draggedItem.name)}</h3>
                     {draggedItem.desc && (
-                      <p className="text-sm text-muted-foreground mt-1">{draggedItem.desc}</p>
+                      <p className="text-xs sm:text-sm text-muted-foreground mt-1 line-clamp-2">{draggedItem.desc}</p>
                     )}
-                    <p className="text-primary font-semibold mt-1">
+                    <p className="text-primary font-semibold text-sm sm:text-base mt-1">
                       {draggedItem.price.toFixed(2)} EUR
                     </p>
                   </div>
@@ -1541,7 +1541,7 @@ const MenuEditor: React.FC = () => {
                         items={availableItems.map(item => item.id)}
                         strategy={verticalListSortingStrategy}
                       >
-                        <div className="space-y-2">
+                        <div className="space-y-2 sm:space-y-2.5">
                           {availableItems.map(item => (
                             <DraggableAvailableItem
                               key={item.id}
@@ -1568,7 +1568,7 @@ const MenuEditor: React.FC = () => {
                         items={dailyItems.map(item => item.id)}
                         strategy={verticalListSortingStrategy}
                       >
-                        <div className="space-y-2">
+                        <div className="space-y-2 sm:space-y-2.5">
                           {dailyItems.map(item => (
                             <SortableDailyItem
                               key={item.id}
@@ -1600,14 +1600,19 @@ const MenuEditor: React.FC = () => {
               </div>
               <DragOverlay>
                 {activeDailyDragId ? (
-                  <div className="bg-card border border-primary rounded-lg p-2 sm:p-2.5 shadow-lg opacity-90">
+                  <div className="bg-card border-2 border-primary rounded-lg p-3 sm:p-4 shadow-lg opacity-90 min-w-[200px]">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs sm:text-sm font-medium">
+                      <span className="text-sm sm:text-base font-semibold">
                         {availableItems.find(i => i.id === activeDailyDragId)?.name || 
                          dailyItems.find(i => i.id === activeDailyDragId)?.name || 
                          'Артикул'}
                       </span>
                     </div>
+                    {(availableItems.find(i => i.id === activeDailyDragId) || dailyItems.find(i => i.id === activeDailyDragId)) && (
+                      <p className="text-xs sm:text-sm text-muted-foreground mt-1">
+                        {(availableItems.find(i => i.id === activeDailyDragId) || dailyItems.find(i => i.id === activeDailyDragId))?.price.toFixed(2)} EUR
+                      </p>
+                    )}
                   </div>
                 ) : null}
               </DragOverlay>
