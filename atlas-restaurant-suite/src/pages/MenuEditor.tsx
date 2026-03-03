@@ -529,6 +529,7 @@ const MenuEditor: React.FC = () => {
   const [bulkMoveDialogOpen, setBulkMoveDialogOpen] = useState(false);
   // Category order state
   const [categoryOrder, setCategoryOrder] = useState<string[]>([]);
+  const [itemOrderUpdate, setItemOrderUpdate] = useState(0); // Force re-render when item order changes
   // Statistics
   const [lastUpdateTime, setLastUpdateTime] = useState<Date | null>(null);
   // Daily Menu state
@@ -569,15 +570,51 @@ const MenuEditor: React.FC = () => {
   });
 
   // Group items by category, handling unassigned items
-  const groupedItems = displayItems.reduce((acc, item) => {
-    // Treat empty, null, or undefined categories as "Unassigned"
-    const category = item.cat && item.cat.trim() ? item.cat.trim() : '📦 Unassigned';
-    if (!acc[category]) {
-      acc[category] = [];
-    }
-    acc[category].push(item);
-    return acc;
-  }, {} as Record<string, MenuItem[]>);
+  const groupedItems = useMemo(() => {
+    const grouped = displayItems.reduce((acc, item) => {
+      // Treat empty, null, or undefined categories as "Unassigned"
+      const category = item.cat && item.cat.trim() ? item.cat.trim() : '📦 Unassigned';
+      if (!acc[category]) {
+        acc[category] = [];
+      }
+      acc[category].push(item);
+      return acc;
+    }, {} as Record<string, MenuItem[]>);
+
+    // Apply saved order for each category
+    Object.keys(grouped).forEach(category => {
+      const orderKey = `menuItemOrder_${category}`;
+      const savedOrder = localStorage.getItem(orderKey);
+      if (savedOrder) {
+        try {
+          const itemIds = JSON.parse(savedOrder) as string[];
+          const itemsById = new Map(grouped[category].map(item => [item.id, item]));
+          const orderedItems: MenuItem[] = [];
+          const unorderedItems: MenuItem[] = [];
+
+          // Add items in saved order
+          itemIds.forEach(id => {
+            const item = itemsById.get(id);
+            if (item) {
+              orderedItems.push(item);
+              itemsById.delete(id);
+            }
+          });
+
+          // Add any new items that weren't in the saved order
+          itemsById.forEach(item => {
+            unorderedItems.push(item);
+          });
+
+          grouped[category] = [...orderedItems, ...unorderedItems];
+        } catch (e) {
+          console.error(`Error loading item order for ${category}:`, e);
+        }
+      }
+    });
+
+    return grouped;
+  }, [displayItems, itemOrderUpdate]);
 
   // Get all unique categories for creating new ones
   const allCategories = useMemo(() => 
@@ -717,10 +754,46 @@ const MenuEditor: React.FC = () => {
     if (!over || active.id === over.id) return;
 
     const item = displayItems.find(i => i.id === active.id);
-    const targetCategory = over.id as string;
+    const targetId = over.id as string;
 
-    if (!item || !targetCategory) return;
+    if (!item || !targetId) return;
 
+    // Check if dropping on another item (for reordering within same category)
+    const targetItem = displayItems.find(i => i.id === targetId);
+    if (targetItem) {
+      const currentCategory = item.cat && item.cat.trim() ? item.cat.trim() : '📦 Unassigned';
+      const targetItemCategory = targetItem.cat && targetItem.cat.trim() ? targetItem.cat.trim() : '📦 Unassigned';
+      
+      // If same category, reorder items
+      if (currentCategory === targetItemCategory) {
+        const categoryItems = groupedItems[currentCategory] || [];
+        const oldIndex = categoryItems.findIndex(i => i.id === active.id);
+        const newIndex = categoryItems.findIndex(i => i.id === targetId);
+        
+        if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
+          // Save new order to localStorage
+          const orderKey = `menuItemOrder_${currentCategory}`;
+          const newOrder = [...categoryItems];
+          const [movedItem] = newOrder.splice(oldIndex, 1);
+          newOrder.splice(newIndex, 0, movedItem);
+          const itemIds = newOrder.map(i => i.id);
+          localStorage.setItem(orderKey, JSON.stringify(itemIds));
+          
+          // Trigger re-render by updating state
+          setItemOrderUpdate(prev => prev + 1);
+          
+          toast({
+            title: 'Success',
+            description: `Reordered items in ${currentCategory}`,
+          });
+        }
+        return;
+      }
+    }
+
+    // Otherwise, treat as category drop (moving to different category)
+    const targetCategory = targetId;
+    
     // Normalize category - if dragging to "Unassigned", use empty string
     const normalizedCategory = targetCategory === '📦 Unassigned' ? '' : targetCategory;
     

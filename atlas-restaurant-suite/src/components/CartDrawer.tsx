@@ -197,10 +197,14 @@ const SortableOrderedItem: React.FC<{
     transform: CSS.Transform.toString(transform),
     transition: isDragging ? 'none' : transition,
     opacity: isDragging ? 0.5 : 0.9,
+    touchAction: 'none' as const, // Enable drag on touch devices
+    WebkitTouchCallout: 'none' as const, // Disable iOS callout
+    WebkitUserSelect: 'none' as const, // Disable text selection
+    userSelect: 'none' as const,
   };
 
   return (
-    <button
+    <div
       ref={setNodeRef}
       style={style}
       onClick={onClick}
@@ -211,14 +215,9 @@ const SortableOrderedItem: React.FC<{
         'hover:border-primary/30 hover:shadow-md hover:bg-card/80',
         'focus:outline-none focus:ring-2 focus:ring-primary/20 focus:ring-offset-2',
         isDragging && 'shadow-lg ring-2 ring-primary/20 z-50 cursor-grabbing opacity-90',
-        !isDragging && 'cursor-grab active:cursor-grabbing min-h-[60px]'
+        !isDragging && 'cursor-grab active:cursor-grabbing min-h-[60px]',
+        onClick && 'cursor-pointer'
       )}
-      style={{
-        touchAction: 'none', // Enable drag on touch devices
-        WebkitTouchCallout: 'none', // Disable iOS callout
-        WebkitUserSelect: 'none', // Disable text selection
-        userSelect: 'none',
-      }}
       onTouchStart={(e) => {
         // Ensure touch events work properly for drag
         const target = e.target as HTMLElement;
@@ -252,7 +251,7 @@ const SortableOrderedItem: React.FC<{
           {(item.price * item.quantity).toFixed(2)} EUR
         </span>
       </div>
-    </button>
+    </div>
   );
 };
 
@@ -564,7 +563,7 @@ const CartDrawer: React.FC<CartDrawerProps> = ({
                         <div className="bg-card border border-primary rounded-lg p-3 sm:p-4 shadow-lg opacity-90">
                           <div className="flex items-center gap-2">
                             <GripVertical className="h-5 w-5 text-muted-foreground" />
-                            <span className="font-semibold">{activeOrderedItem.name}</span>
+                            <span className="font-semibold">{stripAllergenNumbersFromName(activeOrderedItem.name)}</span>
                           </div>
                         </div>
                       ) : null}
@@ -610,14 +609,14 @@ const CartDrawer: React.FC<CartDrawerProps> = ({
                         <div className="bg-card border border-primary rounded-lg p-3 sm:p-4 shadow-lg opacity-90">
                           <div className="flex items-center gap-2">
                             <GripVertical className="h-5 w-5 text-muted-foreground" />
-                            <span className="font-semibold">{activeCartItem.name}</span>
+                            <span className="font-semibold">{stripAllergenNumbersFromName(activeCartItem.name)}</span>
                           </div>
                         </div>
                       ) : activeOrderedItem ? (
                         <div className="bg-card border border-primary rounded-lg p-3 sm:p-4 shadow-lg opacity-90">
                           <div className="flex items-center gap-2">
                             <GripVertical className="h-5 w-5 text-muted-foreground" />
-                            <span className="font-semibold">{activeOrderedItem.name}</span>
+                            <span className="font-semibold">{stripAllergenNumbersFromName(activeOrderedItem.name)}</span>
                           </div>
                         </div>
                       ) : null}
