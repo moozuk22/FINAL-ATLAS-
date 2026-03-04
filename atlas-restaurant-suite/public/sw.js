@@ -41,9 +41,19 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
+  // Skip service worker for WebSocket connections (wss://)
+  if (url.protocol === 'wss:' || url.protocol === 'ws:') {
+    return; // Let browser handle WebSocket connections normally
+  }
+
   // Skip service worker for Vercel preview URLs and external domains
   if (url.hostname.includes('vercel.live') || url.hostname !== self.location.hostname) {
     return; // Let browser handle it normally
+  }
+
+  // Skip service worker for Supabase real-time connections
+  if (url.hostname.includes('supabase.co') && url.pathname.includes('/realtime/')) {
+    return; // Let browser handle Supabase real-time connections normally
   }
 
   // For assets (JS, CSS, images), use network-first strategy with better error handling

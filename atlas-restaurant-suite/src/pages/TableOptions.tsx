@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Utensils, ArrowRight, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -24,19 +24,45 @@ const TableOptions: React.FC = () => {
 
   const tableId = getTableId();
 
+  const checkDailyMenu = useCallback(async () => {
+    setCheckingDailyMenu(true);
+    const items = await getDailyMenuItems(); // today + is_visible=true
+    setHasDailyMenu(items.length > 0);
+    setCheckingDailyMenu(false);
+  }, [getDailyMenuItems]);
+
   useEffect(() => {
     let mounted = true;
     (async () => {
-      setCheckingDailyMenu(true);
-      const items = await getDailyMenuItems(); // today + is_visible=true
-      if (!mounted) return;
-      setHasDailyMenu(items.length > 0);
-      setCheckingDailyMenu(false);
+      await checkDailyMenu();
     })();
     return () => {
       mounted = false;
     };
-  }, [getDailyMenuItems]);
+  }, [checkDailyMenu]);
+
+  // Listen for daily menu changes from MenuEditor
+  useEffect(() => {
+    let channel: BroadcastChannel | null = null;
+    
+    try {
+      channel = new BroadcastChannel('restaurant-updates');
+      channel.onmessage = (event) => {
+        if (event.data.type === 'daily-menu-updated') {
+          // Refresh daily menu check
+          checkDailyMenu();
+        }
+      };
+    } catch (e) {
+      console.log('BroadcastChannel not supported');
+    }
+
+    return () => {
+      if (channel) {
+        channel.close();
+      }
+    };
+  }, [checkDailyMenu]);
 
   return (
     <div className="min-h-screen flex items-center justify-center p-6 bg-background">

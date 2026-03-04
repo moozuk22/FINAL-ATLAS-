@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 
 const KidsZoneAdmin: React.FC = () => {
   const navigate = useNavigate();
-  const { tables, loading } = useRestaurant();
+  const { tables, loading, loadTableSessions } = useRestaurant();
   const [currentTime, setCurrentTime] = useState(Date.now());
   
   // Get all table IDs
@@ -24,6 +24,35 @@ const KidsZoneAdmin: React.FC = () => {
     }, 1000);
     return () => clearInterval(interval);
   }, []);
+
+  // Listen for changes from KidsZoneDashboard (child moved, timer updated, etc.)
+  useEffect(() => {
+    let channel: BroadcastChannel | null = null;
+    
+    try {
+      channel = new BroadcastChannel('restaurant-updates');
+      channel.onmessage = (event) => {
+        if (event.data.type === 'child-returned-to-table' || 
+            event.data.type === 'child-back-to-zone' ||
+            event.data.type === 'animator-updated' ||
+            event.data.type === 'animator-request-accepted') {
+          // Real-time subscription will automatically update the data
+          // Just trigger a manual refresh after a short delay to ensure sync
+          setTimeout(() => {
+            loadTableSessions();
+          }, 300);
+        }
+      };
+    } catch (e) {
+      console.log('BroadcastChannel not supported');
+    }
+
+    return () => {
+      if (channel) {
+        channel.close();
+      }
+    };
+  }, [loadTableSessions]);
 
   // Get all animator requests (all statuses for admin view)
   const allAnimatorRequests = useMemo(() => {

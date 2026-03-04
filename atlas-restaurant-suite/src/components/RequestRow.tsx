@@ -1,5 +1,5 @@
 import React, { memo, useState } from 'react';
-import { Check, Clock, Loader2, ChefHat } from 'lucide-react';
+import { Check, Clock, Loader2, ChefHat, CreditCard } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { TableRequest } from '@/context/RestaurantContext';
 import { cn } from '@/lib/utils';
@@ -11,9 +11,14 @@ interface RequestRowProps {
   isCompleting?: boolean;
 }
 
-const RequestRow: React.FC<RequestRowProps> = ({ request, onComplete, isCompleting = false }) => {
+const RequestRow: React.FC<RequestRowProps> = ({ 
+  request, 
+  onComplete, 
+  isCompleting = false
+}) => {
   const isPending = request.status === 'pending';
   const isConfirmed = request.status === 'confirmed';
+  const isBillRequest = request.requestType === 'bill' || request.action.includes('BILL') || request.action.includes('Сметка');
   const [localConfirmed, setLocalConfirmed] = useState(false);
   const time = new Date(request.timestamp).toLocaleTimeString('bg-BG', {
     hour: '2-digit',

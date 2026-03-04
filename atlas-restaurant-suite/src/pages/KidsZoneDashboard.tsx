@@ -31,7 +31,7 @@ const playAlertSound = () => {
 const KidsZoneDashboard: React.FC = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { tables, completeAnimatorRequest, returnChildToTable, takeChildBackToZone, completeChildSession, loading } = useRestaurant();
+  const { tables, completeAnimatorRequest, returnChildToTable, takeChildBackToZone, completeChildSession, loading, loadTableSessions } = useRestaurant();
   const [completingRequests, setCompletingRequests] = useState<Set<string>>(new Set());
   const [returningRequests, setReturningRequests] = useState<Set<string>>(new Set());
   const [takingBackRequests, setTakingBackRequests] = useState<Set<string>>(new Set());
@@ -76,6 +76,35 @@ const KidsZoneDashboard: React.FC = () => {
     }, 1000);
     return () => clearInterval(interval);
   }, []);
+
+  // Listen for changes from other tabs (StaffDashboard, etc.)
+  useEffect(() => {
+    let channel: BroadcastChannel | null = null;
+    
+    try {
+      channel = new BroadcastChannel('restaurant-updates');
+      channel.onmessage = (event) => {
+        if (event.data.type === 'child-returned-to-table' || 
+            event.data.type === 'child-back-to-zone' ||
+            event.data.type === 'animator-updated' ||
+            event.data.type === 'animator-request-accepted') {
+          // Real-time subscription will automatically update the data
+          // Just trigger a manual refresh after a short delay to ensure sync
+          setTimeout(() => {
+            loadTableSessions();
+          }, 300);
+        }
+      };
+    } catch (e) {
+      console.log('BroadcastChannel not supported');
+    }
+
+    return () => {
+      if (channel) {
+        channel.close();
+      }
+    };
+  }, [loadTableSessions]);
 
   // Calculate timer display for a request
   // Timer only counts when child is in kids_zone (not paused, not on table)
@@ -138,6 +167,21 @@ const KidsZoneDashboard: React.FC = () => {
     
     try {
       await completeAnimatorRequest(tableId, requestId, 'Аниматор');
+      
+      // Send BroadcastChannel message for other tabs
+      try {
+        const channel = new BroadcastChannel('restaurant-updates');
+        channel.postMessage({ type: 'animator-request-accepted', tableId });
+        channel.close();
+      } catch (e) {
+        console.log('BroadcastChannel not supported');
+      }
+      
+      // Real-time subscription will automatically update, but trigger manual refresh to ensure sync
+      setTimeout(() => {
+        loadTableSessions();
+      }, 300);
+      
       toast({
         title: '✅ Заявката е приета',
         description: `Детето от ${tableId.replace('_', ' ')} е прието в детския кът. Таймерът започна.`,
@@ -156,7 +200,7 @@ const KidsZoneDashboard: React.FC = () => {
         return next;
       });
     }
-  }, [completeAnimatorRequest, toast, completingRequests]);
+  }, [completeAnimatorRequest, toast, completingRequests, loadTableSessions]);
 
   const handleReturnChildToTable = useCallback(async (tableId: string, requestId: string) => {
     const requestKey = `${tableId}_${requestId}`;
@@ -173,6 +217,18 @@ const KidsZoneDashboard: React.FC = () => {
         title: '✅ Детето е върнато на масата',
         description: `Таймерът е паузиран за ${tableId.replace('_', ' ')}`,
       });
+      // Send BroadcastChannel message for other tabs
+      try {
+        const channel = new BroadcastChannel('restaurant-updates');
+        channel.postMessage({ type: 'child-returned-to-table', tableId });
+        channel.close();
+      } catch (e) {
+        console.log('BroadcastChannel not supported');
+      }
+      // Real-time subscription will automatically update, but trigger manual refresh to ensure sync
+      setTimeout(() => {
+        loadTableSessions();
+      }, 300);
     } catch (error) {
       console.error('Error returning child to table:', error);
       toast({
@@ -187,7 +243,7 @@ const KidsZoneDashboard: React.FC = () => {
         return next;
       });
     }
-  }, [returnChildToTable, toast, returningRequests]);
+  }, [returnChildToTable, toast, returningRequests, loadTableSessions]);
 
   const handleTakeChildBackToZone = useCallback(async (tableId: string, requestId: string) => {
     const requestKey = `${tableId}_${requestId}`;
@@ -204,6 +260,18 @@ const KidsZoneDashboard: React.FC = () => {
         title: '✅ Детето е взето обратно',
         description: `Таймерът продължава за ${tableId.replace('_', ' ')}`,
       });
+      // Send BroadcastChannel message for other tabs
+      try {
+        const channel = new BroadcastChannel('restaurant-updates');
+        channel.postMessage({ type: 'child-back-to-zone', tableId });
+        channel.close();
+      } catch (e) {
+        console.log('BroadcastChannel not supported');
+      }
+      // Real-time subscription will automatically update, but trigger manual refresh to ensure sync
+      setTimeout(() => {
+        loadTableSessions();
+      }, 300);
     } catch (error) {
       console.error('Error taking child back to zone:', error);
       toast({
@@ -218,7 +286,7 @@ const KidsZoneDashboard: React.FC = () => {
         return next;
       });
     }
-  }, [takeChildBackToZone, toast, takingBackRequests]);
+  }, [takeChildBackToZone, toast, takingBackRequests, loadTableSessions]);
 
   return (
     <div className="min-h-screen pb-20 sm:pb-24">

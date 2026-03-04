@@ -1,5 +1,5 @@
 import React, { useMemo, memo } from 'react';
-import { CheckCircle2 } from 'lucide-react';
+import { CircleCheck, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { TableSession } from '@/context/RestaurantContext';
 import StatusBadge from './StatusBadge';
@@ -12,6 +12,7 @@ interface TableCardProps {
   onMarkAsPaid: () => void;
   onFreeTable?: () => void;
   completingRequests?: Set<string>;
+  markingAsPaidTables?: Set<string>;
 }
 
 const TableCard: React.FC<TableCardProps> = ({
@@ -20,6 +21,7 @@ const TableCard: React.FC<TableCardProps> = ({
   onMarkAsPaid,
   onFreeTable,
   completingRequests = new Set(),
+  markingAsPaidTables = new Set(),
 }) => {
   // Memoize calculations for performance
   const { pendingRequests, completedRequests, hasPending, hasActionablePending, hasActivity, billPaid, totalBill, status, hasBillRequest } = useMemo(() => {
@@ -80,11 +82,21 @@ const TableCard: React.FC<TableCardProps> = ({
               size="sm"
               className="btn-gold text-xs h-8 sm:h-9 px-2 sm:px-3 touch-manipulation"
               onClick={onMarkAsPaid}
+              disabled={markingAsPaidTables.has(session.tableId)}
               aria-label={`Mark ${session.tableId} as paid`}
             >
-              <CheckCircle2 className="h-4 w-4 sm:mr-1" />
-              <span className="hidden sm:inline">Платено</span>
-              <span className="sm:hidden">✓</span>
+              {markingAsPaidTables.has(session.tableId) ? (
+                <>
+                  <Loader2 className="h-4 w-4 sm:mr-1 animate-spin" />
+                  <span className="hidden sm:inline">Обработка...</span>
+                </>
+              ) : (
+                <>
+                  <CircleCheck className="h-4 w-4 sm:mr-1" />
+                  <span className="hidden sm:inline">Платено</span>
+                  <span className="sm:hidden">✓</span>
+                </>
+              )}
             </Button>
           )}
         </div>
@@ -101,14 +113,16 @@ const TableCard: React.FC<TableCardProps> = ({
             {/* Only show pending requests - completed requests should be deleted from table_requests */}
             {pendingRequests
               .sort((a, b) => b.timestamp - a.timestamp)
-              .map(request => (
-                <RequestRow
-                  key={request.id}
-                  request={request}
-                  onComplete={() => onCompleteRequest(request.id)}
-                  isCompleting={completingRequests.has(`${session.tableId}_${request.id}`)}
-                />
-              ))}
+              .map(request => {
+                return (
+                  <RequestRow
+                    key={request.id}
+                    request={request}
+                    onComplete={() => onCompleteRequest(request.id)}
+                    isCompleting={completingRequests.has(`${session.tableId}_${request.id}`)}
+                  />
+                );
+              })}
           </div>
         )}
       </div>

@@ -1,13 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { X, Plus, Minus, ShoppingBag, Trash2, GripVertical } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-} from '@/components/ui/sheet';
 import { CartItem } from '@/context/RestaurantContext';
 import { cn } from '@/lib/utils';
 import { triggerHapticFeedback } from '@/utils/optimization';
@@ -47,6 +40,7 @@ interface CartDrawerProps {
   orderedItems?: Array<{ id: string; name: string; price: number; quantity: number }>; // Items from confirmed orders (read-only)
   kidsZoneFee?: number; // Kids Zone fee from animator (used for totals, display may differ)
   kidsZoneTime?: string; // Kids Zone elapsed time display (HH:MM:SS)
+  kidsZoneTimerData?: { timerStartedAt?: number; totalTimeElapsed?: number; childLocation?: string; timerPausedAt?: number; hourlyRate?: number }; // Kids Zone timer data for real-time updates
   menuDropRef?: (node: HTMLElement | null) => void; // external drop zone for menu -> drawer
   menuDropIsOver?: boolean;
 }
@@ -257,7 +251,7 @@ const SortableOrderedItem: React.FC<{
 
 const KIDS_ZONE_SORTABLE_ID = 'kids_zone';
 
-const SortableKidsZoneRow: React.FC<{ time?: string }> = ({ time }) => {
+const SortableKidsZoneRow: React.FC<{ time?: string; fee?: number }> = ({ time, fee }) => {
   const {
     attributes,
     listeners,
@@ -300,19 +294,41 @@ const SortableKidsZoneRow: React.FC<{ time?: string }> = ({ time }) => {
         // Enable drag for the element itself
       }}
     >
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2 min-w-0">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-2">
           <span className="text-base">🎭</span>
           <span className="font-semibold text-sm sm:text-base text-foreground truncate">
             Детски кът
           </span>
         </div>
         {time && (
-          <span className="font-mono text-sm sm:text-base font-bold text-primary flex-shrink-0">
+            <div className="flex items-center gap-2">
+              <span className="text-xs sm:text-sm text-muted-foreground">Време:</span>
+              <span className="font-mono text-xs sm:text-sm font-semibold text-primary">
             {time}
           </span>
+            </div>
+          )}
+        </div>
+        {fee !== undefined && fee > 0 && (
+          <div className="flex flex-col items-end gap-1 flex-shrink-0">
+            <span className="text-sm sm:text-base font-bold text-primary">
+              {fee.toFixed(2)} EUR
+            </span>
+          </div>
         )}
       </div>
+      {fee !== undefined && fee > 0 && (
+        <div className="mt-2 pt-2 border-t border-border/50 flex items-center justify-between">
+          <span className="text-xs sm:text-sm font-semibold text-muted-foreground">
+            Детски кът:
+          </span>
+          <span className="text-sm sm:text-base font-bold text-primary">
+            {fee.toFixed(2)} EUR
+          </span>
+        </div>
+      )}
     </div>
   );
 };
@@ -333,6 +349,7 @@ const CartDrawer: React.FC<CartDrawerProps> = ({
   orderedItems = [],
   kidsZoneFee = 0,
   kidsZoneTime,
+  kidsZoneTimerData,
   menuDropRef,
   menuDropIsOver = false,
 }) => {
@@ -341,6 +358,39 @@ const CartDrawer: React.FC<CartDrawerProps> = ({
   const [items, setItems] = useState<CartItem[]>(cartItems);
   const [ordered, setOrdered] = useState<Array<{ id: string; name: string; price: number; quantity: number }>>(orderedItems);
   const [orderedDisplayIds, setOrderedDisplayIds] = useState<string[]>([]);
+  const [currentTime, setCurrentTime] = useState(Date.now());
+
+  // Update current time every second for real-time timer display
+  useEffect(() => {
+    if (!kidsZoneTimerData) return;
+    
+    const interval = setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 1000);
+    
+    return () => clearInterval(interval);
+  }, [kidsZoneTimerData]);
+
+  // Calculate real-time timer display if timer data is provided
+  const realTimeKidsZoneTime = useMemo(() => {
+    if (!kidsZoneTimerData || !kidsZoneTimerData.timerStartedAt) {
+      return kidsZoneTime; // Fallback to provided time string
+    }
+    
+    let totalSeconds = kidsZoneTimerData.totalTimeElapsed || 0;
+    
+    // If timer is running (not paused), add elapsed time since start
+    if (kidsZoneTimerData.childLocation === 'kids_zone' && !kidsZoneTimerData.timerPausedAt) {
+      const elapsedSinceStart = Math.floor((currentTime - kidsZoneTimerData.timerStartedAt) / 1000);
+      totalSeconds += elapsedSinceStart;
+    }
+    
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  }, [kidsZoneTimerData, currentTime, kidsZoneTime]);
 
   // Update local items when props change
   useEffect(() => {
@@ -353,9 +403,12 @@ const CartDrawer: React.FC<CartDrawerProps> = ({
 
   useEffect(() => {
     const ids = orderedItems.map(i => i.id);
-    if (kidsZoneFee > 0) ids.push(KIDS_ZONE_SORTABLE_ID);
+    // Show kids zone row if there's a fee OR if there's time (active timer) OR if there's timer data
+    if (kidsZoneFee > 0 || kidsZoneTime || realTimeKidsZoneTime || kidsZoneTimerData) {
+      ids.push(KIDS_ZONE_SORTABLE_ID);
+    }
     setOrderedDisplayIds(ids);
-  }, [orderedItems, kidsZoneFee]);
+  }, [orderedItems, kidsZoneFee, kidsZoneTime, realTimeKidsZoneTime, kidsZoneTimerData]);
 
   // Use the droppable ref passed from CustomerMenu's DndContext
   // This ensures the drop zone is registered in the parent DndContext
@@ -464,36 +517,68 @@ const CartDrawer: React.FC<CartDrawerProps> = ({
     onRemoveItem(itemId);
   };
 
+  if (!open) return null;
+
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="bottom" className="h-[85vh] sm:h-[80vh] flex flex-col p-0">
-        <SheetHeader className="px-4 sm:px-6 pt-4 sm:pt-6 pb-3 border-b border-border">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                <ShoppingBag className="h-5 w-5 text-primary" />
+    <>
+      {/* Backdrop */}
+      <div 
+        className="fixed inset-0 bg-background/60 backdrop-blur-sm z-50 transition-opacity duration-300 opacity-0"
+        style={{ animation: 'fadeIn 0.3s ease-out forwards' }}
+        onClick={() => onOpenChange(false)}
+      />
+      
+      {/* Bottom Sheet */}
+      <div className="fixed inset-0 z-50 flex items-end justify-center pointer-events-none">
+        <div 
+          className="w-full max-w-3xl bg-background border-t border-border rounded-t-2xl shadow-2xl flex flex-col max-h-[85vh] pointer-events-auto transform transition-transform duration-300 ease-out"
+          style={{ animation: 'slideUp 0.3s ease-out forwards' }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Header */}
+          <div className="px-4 sm:px-6 pt-5 pb-4 border-b border-border/50">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                  <ShoppingBag className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-display font-bold">Кошница</h2>
+                  <p className="text-sm text-muted-foreground">
+                    {itemCount} {itemCount === 1 ? 'артикул' : 'артикула'}
+                  </p>
+                </div>
               </div>
-              <div>
-                <SheetTitle className="text-xl font-display">Кошница</SheetTitle>
-                <SheetDescription className="text-sm text-muted-foreground">
-                  {itemCount} {itemCount === 1 ? 'артикул' : 'артикула'}
-                </SheetDescription>
+              <div className="flex items-center gap-2">
+                {items.length > 0 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={onClearCart}
+                    disabled={disabled || isLoading}
+                    className="text-destructive hover:text-destructive hover:bg-destructive/10 h-9"
+                  >
+                    <Trash2 className="h-4 w-4 sm:mr-2" />
+                    <span className="hidden sm:inline">Изчисти</span>
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => onOpenChange(false)}
+                  className="h-9 w-9 rounded-xl hover:bg-muted"
+                  aria-label="Close cart"
+                >
+                  <X className="h-5 w-5" />
+                </Button>
               </div>
             </div>
-            {items.length > 0 && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={onClearCart}
-                disabled={disabled || isLoading}
-                className="text-destructive hover:text-destructive hover:bg-destructive/10"
-              >
-                <Trash2 className="h-4 w-4 mr-2" />
-                <span className="hidden sm:inline">Изчисти</span>
-              </Button>
-            )}
+            
+            {/* Drag handle indicator */}
+            <div className="flex justify-center">
+              <div className="h-1 w-12 rounded-full bg-muted-foreground/30" />
+            </div>
           </div>
-        </SheetHeader>
 
         <div
           ref={menuDropRef as React.Ref<HTMLDivElement>}
@@ -524,7 +609,7 @@ const CartDrawer: React.FC<CartDrawerProps> = ({
           ) : (
             <>
               {/* Ordered Items (Read-only with Drag & Drop) */}
-              {(ordered.length > 0 || kidsZoneFee > 0) && (
+              {(ordered.length > 0 || kidsZoneFee > 0 || kidsZoneTime || realTimeKidsZoneTime || kidsZoneTimerData) && (
                 <div className="mb-4">
                   <h3 className="text-xs sm:text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2 sm:mb-3">
                     Поръчани артикули
@@ -542,7 +627,7 @@ const CartDrawer: React.FC<CartDrawerProps> = ({
                       <div className="space-y-2 sm:space-y-2.5">
                         {orderedDisplayIds.map((id) => {
                           if (id === KIDS_ZONE_SORTABLE_ID) {
-                            return <SortableKidsZoneRow key={id} time={kidsZoneTime} />;
+                            return <SortableKidsZoneRow key={id} time={realTimeKidsZoneTime || kidsZoneTime} fee={kidsZoneFee} />;
                           }
                           const item = ordered.find(i => i.id === id);
                           if (!item) return null;
@@ -628,21 +713,41 @@ const CartDrawer: React.FC<CartDrawerProps> = ({
           )}
         </div>
 
-        {/* Footer with Total */}
-        {allItems.length > 0 && (
-          <div className="border-t border-border bg-background/95 backdrop-blur-sm px-4 sm:px-6 py-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-base sm:text-lg font-medium text-foreground">
-                Общо:
-              </span>
-              <span className="font-display text-2xl sm:text-3xl font-bold text-primary">
-                {total.toFixed(2)} EUR
-              </span>
+          {/* Footer with Total */}
+          {allItems.length > 0 && (
+            <div className="border-t border-border/50 bg-background/95 backdrop-blur-sm px-4 sm:px-6 py-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-base sm:text-lg font-medium text-foreground">
+                  Общо:
+                </span>
+                <span className="font-display text-2xl sm:text-3xl font-bold text-primary">
+                  {total.toFixed(2)} EUR
+                </span>
+              </div>
+
+              {/* Kids Zone Summary */}
+              {(kidsZoneFee > 0 || realTimeKidsZoneTime || kidsZoneTime) && (
+                <div className="flex items-center justify-between mb-2 text-xs sm:text-sm text-muted-foreground">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-base">🎭</span>
+                    <span>Детски кът{(realTimeKidsZoneTime || kidsZoneTime) ? ` • ${realTimeKidsZoneTime || kidsZoneTime}` : ''}</span>
+                  </div>
+                  {kidsZoneFee > 0 && (
+                    <span className="font-semibold text-foreground">
+                      + {kidsZoneFee.toFixed(2)} EUR
+                    </span>
+                  )}
+                </div>
+              )}
+
+              <p className="text-[11px] sm:text-xs text-muted-foreground mt-1">
+                Потвърдете поръчката отдолу, когато сте готови.
+              </p>
             </div>
-          </div>
-        )}
-      </SheetContent>
-    </Sheet>
+          )}
+        </div>
+      </div>
+    </>
   );
 };
 

@@ -32,9 +32,10 @@ const playAlertSound = () => {
 const StaffDashboard: React.FC = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { tables, completeRequest, markAsPaid, resetTable, loading } = useRestaurant();
+  const { tables, completeRequest, markAsPaid, markBillRequestsAsPaid, resetTable, loading, loadTableSessions } = useRestaurant();
   const prevPendingCountRef = useRef<number>(0);
   const [completingRequests, setCompletingRequests] = useState<Set<string>>(new Set());
+  const [markingAsPaidTables, setMarkingAsPaidTables] = useState<Set<string>>(new Set());
   const [revenueReportOpen, setRevenueReportOpen] = useState(false);
   
   // Get all table IDs in order - memoized
@@ -66,6 +67,32 @@ const StaffDashboard: React.FC = () => {
     prevPendingCountRef.current = totalPending;
   }, [totalPending]);
 
+  // Listen for order/bill submissions - real-time subscription handles updates automatically
+  useEffect(() => {
+    let channel: BroadcastChannel | null = null;
+    
+    try {
+      channel = new BroadcastChannel('restaurant-updates');
+      channel.onmessage = (event) => {
+        if (event.data.type === 'order-submitted' || event.data.type === 'bill-requested') {
+          // Real-time subscription will automatically update the data
+          // Just trigger a manual refresh after a short delay to ensure sync
+          setTimeout(() => {
+            loadTableSessions();
+          }, 300);
+        }
+      };
+    } catch (e) {
+      console.log('BroadcastChannel not supported');
+    }
+
+    return () => {
+      if (channel) {
+        channel.close();
+      }
+    };
+  }, [loadTableSessions]);
+
   const handleCompleteRequest = useCallback(async (tableId: string, requestId: string) => {
     const requestKey = `${tableId}_${requestId}`;
 
@@ -74,19 +101,50 @@ const StaffDashboard: React.FC = () => {
       return;
     }
     
+    // Check if this is a bill request
+    const session = tables[tableId];
+    const request = session?.requests.find(r => r.id === requestId);
+    const isBillRequest = request && (request.requestType === 'bill' || request.action.includes('BILL') || request.action.includes('Сметка'));
+    
     setCompletingRequests(prev => new Set(prev).add(requestKey));
     
     try {
-      await completeRequest(tableId, requestId);
-      toast({
-        title: '✅ Поръчката е потвърдена',
-        description: 'Поръчката е потвърдена и се приготвя',
-      });
+      if (isBillRequest) {
+        // За заявка за сметка: само потвърждаваме, че сметката е приета (status: confirmed)
+        await completeRequest(tableId, requestId);
+        toast({
+          title: '✅ Сметката е приета',
+          description: 'Заявката за сметка е приета. Занесете сметката на масата.',
+        });
+        // Send BroadcastChannel message for other tabs
+        try {
+          const channel = new BroadcastChannel('restaurant-updates');
+          channel.postMessage({ type: 'bill-confirmed', tableId });
+          channel.close();
+        } catch (e) {
+          console.log('BroadcastChannel not supported');
+        }
+      } else {
+        // За поръчки: потвърждаваме поръчката (status: confirmed)
+        await completeRequest(tableId, requestId);
+        toast({
+          title: '✅ Поръчката е потвърдена',
+          description: 'Поръчката е потвърдена и се приготвя',
+        });
+        // Send BroadcastChannel message for other tabs
+        try {
+          const channel = new BroadcastChannel('restaurant-updates');
+          channel.postMessage({ type: 'order-confirmed', tableId });
+          channel.close();
+        } catch (e) {
+          console.log('BroadcastChannel not supported');
+        }
+      }
     } catch (error) {
       console.error('Error completing request:', error);
       toast({
         title: 'Грешка',
-        description: 'Неуспешно потвърждаване на поръчка',
+        description: isBillRequest ? 'Неуспешно потвърждаване на заявка за сметка' : 'Неуспешно потвърждаване на поръчка',
         variant: 'destructive',
       });
     } finally {
@@ -96,13 +154,21 @@ const StaffDashboard: React.FC = () => {
         return next;
       });
     }
-  }, [completeRequest, toast, completingRequests]);
+  }, [completeRequest, toast, completingRequests, tables]);
 
   const handleMarkAsPaid = useCallback(async (tableId: string) => {
     const tableName = tableId.replace('_', ' ');
+    
+    // Prevent double-clicks
+    if (markingAsPaidTables.has(tableId)) {
+      return;
+    }
+    
     if (!confirm(`Маркиране на ${tableName} като платена?\n\nТова ще завърши всички чакащи заявки и ще отключи таблицата.`)) {
       return;
     }
+    
+    setMarkingAsPaidTables(prev => new Set(prev).add(tableId));
     
     try {
       await markAsPaid(tableId);
@@ -111,6 +177,18 @@ const StaffDashboard: React.FC = () => {
         description: `${tableName} е маркирана като платена и е отключена`,
         duration: 3000,
       });
+      // Send BroadcastChannel message for other tabs
+      try {
+        const channel = new BroadcastChannel('restaurant-updates');
+        channel.postMessage({ type: 'table-paid', tableId });
+        channel.close();
+      } catch (e) {
+        console.log('BroadcastChannel not supported');
+      }
+      // Real-time subscription will automatically update, but trigger manual refresh to ensure sync
+      setTimeout(() => {
+        loadTableSessions();
+      }, 300);
     } catch (error) {
       console.error('Error marking as paid:', error);
       toast({
@@ -118,8 +196,14 @@ const StaffDashboard: React.FC = () => {
         description: 'Неуспешно маркиране като платена. Моля опитайте отново.',
         variant: 'destructive',
       });
+    } finally {
+      setMarkingAsPaidTables(prev => {
+        const next = new Set(prev);
+        next.delete(tableId);
+        return next;
+      });
     }
-  }, [markAsPaid, toast]);
+  }, [markAsPaid, toast, markingAsPaidTables]);
 
   const handleFreeTable = useCallback(async (tableId: string) => {
     const tableName = tableId.replace('_', ' ');
@@ -253,6 +337,7 @@ const StaffDashboard: React.FC = () => {
                 onMarkAsPaid={() => handleMarkAsPaid(tableId)}
                 onFreeTable={() => handleFreeTable(tableId)}
                 completingRequests={completingRequests}
+                markingAsPaidTables={markingAsPaidTables}
               />
             );
           })}

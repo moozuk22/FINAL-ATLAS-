@@ -108,6 +108,7 @@ interface RestaurantContextType {
   takeChildBackToZone: (tableId: string, requestId: string) => Promise<void>;
   completeChildSession: (tableId: string, requestId: string) => Promise<void>;
   markAsPaid: (tableId: string) => Promise<void>;
+  markBillRequestsAsPaid: (tableId: string) => Promise<void>;
   resetTable: (tableId: string) => Promise<void>;
   getCartTotal: (tableId: string) => number;
   getCartItemCount: (tableId: string) => number;
@@ -124,6 +125,8 @@ interface RestaurantContextType {
   // Reports
   getRevenueReport: (date: string) => Promise<RevenueReport>;
   getPendingOrders: () => TableRequest[];
+  // Manual refresh
+  loadTableSessions: () => Promise<void>;
 }
 
 const RestaurantContext = createContext<RestaurantContextType | undefined>(undefined);
@@ -466,10 +469,27 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       )
       .subscribe();
 
+    // Real-time subscription for restaurant_tables changes
+    const tablesSubscription = supabase
+      .channel('tables_changes')
+      .on('postgres_changes',
+        { 
+          event: '*', // Listen to INSERT, UPDATE, DELETE
+          schema: 'public', 
+          table: 'restaurant_tables' 
+        },
+        () => {
+          // Debounced reload to prevent excessive calls
+          debouncedReload();
+        }
+      )
+      .subscribe();
+
     return () => {
       supabase.removeChannel(cartSubscription);
       supabase.removeChannel(requestsSubscription);
       supabase.removeChannel(menuSubscription);
+      supabase.removeChannel(tablesSubscription);
     };
   }, [loadTableSessions]);
 
@@ -832,11 +852,8 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           request_type: 'bill',
         });
 
-      // Lock table
-      await supabase
-        .from('restaurant_tables')
-        .update({ is_locked: true })
-        .eq('table_id', tableId);
+      // Don't lock table when requesting bill - allow customer to see menu
+      // Table will be locked/reset when bill is marked as paid by staff
     } catch (error) {
       console.error('Error requesting bill:', error);
     }
@@ -899,14 +916,14 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         throw fetchError || new Error('Request not found');
       }
 
-      const now = new Date().toISOString();
-      const nowTimestamp = Date.now();
+      const nowTimestamp = Date.now(); // Use timestamp (milliseconds) for BIGINT field
       let finalElapsed = currentRequest.total_time_elapsed || 0;
 
       // If timer was running, add the elapsed time since it started
       if (currentRequest.timer_started_at && !currentRequest.timer_paused_at) {
+        // timer_started_at is stored as BIGINT (timestamp in milliseconds)
         const timerStartedAt = typeof currentRequest.timer_started_at === 'string' 
-          ? new Date(currentRequest.timer_started_at).getTime() 
+          ? parseInt(currentRequest.timer_started_at, 10)
           : currentRequest.timer_started_at;
         const elapsedSinceStart = Math.floor((nowTimestamp - timerStartedAt) / 1000);
         finalElapsed += elapsedSinceStart;
@@ -923,7 +940,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         .update({ 
           child_location: 'table',
           total_time_elapsed: finalElapsed,
-          timer_paused_at: now
+          timer_paused_at: nowTimestamp // Use timestamp instead of ISO string
         })
         .eq('id', requestId)
         .eq('table_id', tableId);
@@ -939,7 +956,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             details: `${Math.floor(finalElapsed / 60)} минути в детския кът`,
             total: cost,
             status: 'confirmed',
-            timestamp: now,
+            timestamp: nowTimestamp, // Use timestamp (BIGINT) instead of ISO string
             request_type: 'kids_zone',
             source: 'direct'
           });
@@ -1478,14 +1495,14 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   // Complete animator request (only animator can do this) - starts timer
   const completeAnimatorRequest = useCallback(async (tableId: string, requestId: string, animatorName: string) => {
     try {
-      const now = new Date().toISOString();
+      const nowTimestamp = Date.now(); // Use timestamp (milliseconds) for BIGINT field
       const { error: updateError } = await supabase
         .from('table_requests')
         .update({ 
           status: 'confirmed',
           assigned_to: animatorName,
           child_location: 'kids_zone',
-          timer_started_at: now,
+          timer_started_at: nowTimestamp,
           timer_paused_at: null,
           total_time_elapsed: 0,
           hourly_rate: 10.00 // Default 10 EUR per hour
@@ -1521,14 +1538,14 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         throw fetchError || new Error('Request not found');
       }
 
-      const now = new Date().toISOString();
-      const nowTimestamp = Date.now();
+      const nowTimestamp = Date.now(); // Use timestamp (milliseconds) for BIGINT field
       let newElapsed = currentRequest.total_time_elapsed || 0;
 
       // If timer was running, add the elapsed time since it started
       if (currentRequest.timer_started_at && !currentRequest.timer_paused_at) {
+        // timer_started_at is stored as BIGINT (timestamp in milliseconds)
         const timerStartedAt = typeof currentRequest.timer_started_at === 'string' 
-          ? new Date(currentRequest.timer_started_at).getTime() 
+          ? parseInt(currentRequest.timer_started_at, 10)
           : currentRequest.timer_started_at;
         const elapsedSinceStart = Math.floor((nowTimestamp - timerStartedAt) / 1000);
         newElapsed += elapsedSinceStart;
@@ -1538,7 +1555,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         .from('table_requests')
         .update({ 
           child_location: 'returning_to_table',
-          timer_paused_at: now,
+          timer_paused_at: nowTimestamp, // Use timestamp instead of ISO string
           total_time_elapsed: newElapsed
         })
         .eq('id', requestId)
@@ -1559,12 +1576,12 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   // Take child back to zone - resumes timer
   const takeChildBackToZone = useCallback(async (tableId: string, requestId: string) => {
     try {
-      const now = new Date().toISOString();
+      const nowTimestamp = Date.now(); // Use timestamp (milliseconds) for BIGINT field
       const { error: updateError } = await supabase
         .from('table_requests')
         .update({ 
           child_location: 'kids_zone',
-          timer_started_at: now, // Restart timer from now
+          timer_started_at: nowTimestamp, // Restart timer from now (timestamp)
           timer_paused_at: null
         })
         .eq('id', requestId)
@@ -1572,6 +1589,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       if (updateError) {
         console.error('Error taking child back to zone:', updateError);
+        console.error('Update details:', { tableId, requestId, nowTimestamp });
         loadTableSessions();
         throw updateError;
       }
@@ -1581,6 +1599,99 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       throw error;
     }
   }, [loadTableSessions]);
+
+  // Mark only bill requests as paid (leave orders untouched)
+  const markBillRequestsAsPaid = useCallback(async (tableId: string) => {
+    const currentTable = tables[tableId];
+    if (!currentTable) return;
+
+    // Get all bill requests for this table
+    const billRequests = currentTable.requests.filter(
+      r => (r.requestType === 'bill' || r.action.includes('BILL') || r.action.includes('Сметка')) &&
+           (r.status === 'pending' || r.status === 'confirmed')
+    );
+
+    if (billRequests.length === 0) {
+      console.log(`No bill requests to mark as paid for ${tableId}`);
+      return;
+    }
+
+    // Optimistic update: remove only bill requests from local state
+    setTables(prev => {
+      const updated = { ...prev };
+      if (!updated[tableId]) return updated;
+      
+      updated[tableId] = {
+        ...updated[tableId],
+        requests: updated[tableId].requests.filter(
+          r => !(r.requestType === 'bill' || r.action.includes('BILL') || r.action.includes('Сметка')) ||
+                (r.status !== 'pending' && r.status !== 'confirmed')
+        ),
+      };
+      
+      return updated;
+    });
+
+    try {
+      // Mark all bill requests as completed in database
+      const billRequestIds = billRequests.map(r => r.id);
+      
+      const { error: updateError } = await supabase
+        .from('table_requests')
+        .update({ status: 'completed' })
+        .eq('table_id', tableId)
+        .in('id', billRequestIds);
+
+      if (updateError) {
+        console.error('Error marking bill requests as paid:', updateError);
+        loadTableSessions();
+        throw updateError;
+      }
+
+      // Move bill requests to completed_orders
+      const completedBills = billRequests.map(req => ({
+        id: req.id,
+        table_id: req.table_id,
+        action: req.action,
+        details: req.details || '',
+        total: req.total,
+        status: 'completed' as const,
+        timestamp: req.timestamp,
+        payment_method: req.paymentMethod || null,
+      }));
+
+      if (completedBills.length > 0) {
+        const { error: insertError } = await supabase
+          .from('completed_orders')
+          .insert(completedBills);
+
+        if (insertError) {
+          console.error('Error moving bills to completed_orders:', insertError);
+          // Continue even if insert fails
+        }
+      }
+
+      // Delete bill requests from table_requests (they're now in completed_orders)
+      const { error: deleteError } = await supabase
+        .from('table_requests')
+        .delete()
+        .eq('table_id', tableId)
+        .in('id', billRequestIds);
+
+      if (deleteError) {
+        console.error('Error deleting bill requests:', deleteError);
+        // Reload to sync state
+        loadTableSessions();
+      } else {
+        // Reload to ensure UI is in sync
+        loadTableSessions();
+      }
+    } catch (error) {
+      console.error('Error marking bill requests as paid:', error);
+      loadTableSessions();
+      throw error;
+    }
+  }, [tables, loadTableSessions]);
 
   // Daily menu functions
   const getDailyMenuItems = useCallback(async (date?: string): Promise<MenuItem[]> => {
@@ -1731,6 +1842,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       takeChildBackToZone,
       completeChildSession,
     markAsPaid,
+    markBillRequestsAsPaid,
       resetTable,
       getCartTotal,
       getCartItemCount,
@@ -1743,6 +1855,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     submitRating,
     getRevenueReport,
     getPendingOrders,
+    loadTableSessions,
   }), [
       tables,
     menuItems,
@@ -1762,6 +1875,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       takeChildBackToZone,
       completeChildSession,
     markAsPaid,
+    markBillRequestsAsPaid,
       resetTable,
       getCartTotal,
       getCartItemCount,
@@ -1774,6 +1888,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     submitRating,
     getRevenueReport,
     getPendingOrders,
+    loadTableSessions,
   ]);
 
   return (

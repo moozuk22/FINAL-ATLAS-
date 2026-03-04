@@ -14,7 +14,9 @@
     "test:watch": "vitest",
     "type-check": "tsc --noEmit",
     "migrate:complete": "tsx scripts/migrate-complete.ts",
-    "migrate:verify": "tsx scripts/verify-migration.ts"
+    "migrate:verify": "tsx scripts/verify-migration.ts",
+    "test:connections": "tsx scripts/test-connections.ts",
+    "clear:table": "tsx scripts/clear-table.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

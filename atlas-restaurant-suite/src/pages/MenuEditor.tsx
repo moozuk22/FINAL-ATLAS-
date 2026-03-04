@@ -1234,6 +1234,16 @@ const MenuEditor: React.FC = () => {
       const newItemIds = [...currentItemIds, item.id];
       await setDailyMenuItems(selectedDate, newItemIds);
       await loadDailyMenu();
+      
+      // Notify other tabs about daily menu changes
+      try {
+        const channel = new BroadcastChannel('restaurant-updates');
+        channel.postMessage({ type: 'daily-menu-updated', date: selectedDate });
+        channel.close();
+      } catch (e) {
+        console.log('BroadcastChannel not supported');
+      }
+      
       toast({
         title: '✅ Добавено',
         description: `${item.name} е добавено в менюто за деня`,
@@ -1254,6 +1264,16 @@ const MenuEditor: React.FC = () => {
       const newItemIds = currentItemIds.filter(id => id !== itemId);
       await setDailyMenuItems(selectedDate, newItemIds);
       await loadDailyMenu();
+      
+      // Notify other tabs about daily menu changes
+      try {
+        const channel = new BroadcastChannel('restaurant-updates');
+        channel.postMessage({ type: 'daily-menu-updated', date: selectedDate });
+        channel.close();
+      } catch (e) {
+        console.log('BroadcastChannel not supported');
+      }
+      
       toast({
         title: '✅ Премахнато',
         description: 'Артикулът е премахнат от менюто за деня',
@@ -1322,6 +1342,15 @@ const MenuEditor: React.FC = () => {
         try {
           await setDailyMenuItems(selectedDate, newItemIds);
           setDailyItems(newItems);
+          
+          // Notify other tabs about daily menu changes
+          try {
+            const channel = new BroadcastChannel('restaurant-updates');
+            channel.postMessage({ type: 'daily-menu-updated', date: selectedDate });
+            channel.close();
+          } catch (e) {
+            console.log('BroadcastChannel not supported');
+          }
         } catch (error) {
           console.error('Error reordering daily menu:', error);
           toast({

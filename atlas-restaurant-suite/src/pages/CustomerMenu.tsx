@@ -1,11 +1,10 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useSearchParams, useNavigate, useParams } from 'react-router-dom';
-import { Send, Bell, CreditCard, Lock, ArrowLeft, Loader2, Sparkles, ShoppingBag } from 'lucide-react';
+import { Send, Bell, CreditCard, Lock, ArrowLeft, Loader2, Sparkles, ShoppingBag, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { useRestaurant, MenuItem } from '@/context/RestaurantContext';
 import MenuItemCard from '@/components/MenuItemCard';
-import CartSummary from '@/components/CartSummary';
 import CartDrawer from '@/components/CartDrawer';
 import PaymentModal from '@/components/PaymentModal';
 import RatingModal from '@/components/RatingModal';
@@ -137,7 +136,7 @@ const CustomerMenu: React.FC = () => {
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
-  
+
   const {
     menuItems,
     getDailyMenuItems,
@@ -151,11 +150,66 @@ const CustomerMenu: React.FC = () => {
     callAnimator,
     requestBill,
     loading,
+    loadTableSessions,
+    tables,
   } = useRestaurant();
+
+  // Listen for changes from admin pages (order confirmed, table paid, etc.)
+  useEffect(() => {
+    let channel: BroadcastChannel | null = null;
+    
+    try {
+      channel = new BroadcastChannel('restaurant-updates');
+      channel.onmessage = (event) => {
+        // Only listen for events related to this table
+        if (event.data.tableId === tableId) {
+          if (event.data.type === 'order-confirmed') {
+            // Refresh data to update cart drawer visually
+            setTimeout(() => {
+              loadTableSessions();
+            }, 300);
+            toast({
+              title: '✅ Поръчката е потвърдена',
+              description: 'Вашата поръчка е потвърдена и се приготвя',
+              duration: 3000,
+            });
+          } else if (event.data.type === 'bill-confirmed') {
+            // Refresh data to update cart drawer visually
+            setTimeout(() => {
+              loadTableSessions();
+            }, 300);
+            toast({
+              title: '✅ Сметката е приета',
+              description: 'Вашата заявка за сметка е приета. Сметката ще бъде донесена скоро.',
+              duration: 3000,
+            });
+          } else if (event.data.type === 'table-paid') {
+            // Refresh data to update cart drawer visually
+            setTimeout(() => {
+              loadTableSessions();
+            }, 300);
+            toast({
+              title: '✅ Сметката е платена',
+              description: 'Благодарим ви! Сесията е приключена.',
+              duration: 5000,
+            });
+          }
+        }
+      };
+    } catch (e) {
+      console.log('BroadcastChannel not supported');
+    }
+
+    return () => {
+      if (channel) {
+        channel.close();
+      }
+    };
+  }, [tableId, toast, loadTableSessions]);
 
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [ratingModalOpen, setRatingModalOpen] = useState(false);
-  const [cartDrawerOpen, setCartDrawerOpen] = useState(false);
+  const [cartDrawerOpen, setCartDrawerOpen] = useState(false); // Cart drawer closed by default
   const [loadingItems, setLoadingItems] = useState<Set<string>>(new Set());
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isOffline, setIsOffline] = useState(!isOnline());
@@ -216,7 +270,8 @@ const CustomerMenu: React.FC = () => {
     })
   );
   
-  const session = getTableSession(tableId);
+  // Use useMemo to ensure session updates when tables change from real-time subscriptions
+  const session = useMemo(() => getTableSession(tableId), [tables, tableId, getTableSession]);
   
   // Get animator request status
   const animatorRequest = useMemo(() => {
@@ -248,7 +303,7 @@ const CustomerMenu: React.FC = () => {
     };
   }, [animatorRequest, currentTime]);
   
-  // Calculate total bill from all confirmed orders + pending items (not cart until order is submitted)
+  // Calculate total bill from all confirmed orders + pending items + kids zone fee (not cart until order is submitted)
   // Always use latest prices from menuItems for pending items
   const totalBill = useMemo(() => {
     // Calculate pending items total using latest prices from menuItems
@@ -260,8 +315,12 @@ const CustomerMenu: React.FC = () => {
     
     // Only include confirmed orders, not cart items (cart is only used after order submission)
     const confirmedOrdersTotal = session.requests.reduce((sum, r) => sum + r.total, 0);
-    return confirmedOrdersTotal + pendingTotal;
-  }, [session.requests, pendingItems, menuItems]);
+    
+    // Add kids zone fee if timer is running
+    const kidsZoneFee = childTimer?.cost || 0;
+    
+    return confirmedOrdersTotal + pendingTotal + kidsZoneFee;
+  }, [session.requests, pendingItems, menuItems, childTimer]);
   
   // Calculate pending items total separately for display
   const pendingItemsTotal = useMemo(() => {
@@ -459,25 +518,18 @@ const CustomerMenu: React.FC = () => {
     
     triggerHapticFeedback('light');
     
-    // Add to pending items instead of cart
-    // Price will be fetched from menuItems when needed
+    // Add to pending items
     setPendingItems(prev => {
       const existing = prev.find(p => p.id === item.id);
       if (existing) {
-        const updated = prev.map(p => 
-          p.id === item.id 
-            ? { ...p, quantity: p.quantity + 1 }
-            : p
+        return prev.map(p => 
+          p.id === item.id ? { ...p, quantity: p.quantity + 1 } : p
         );
-        return updated;
       }
-      const newItems = [...prev, {
-        id: item.id,
-        name: item.name,
-        price: item.price, // Store current price, but will be refreshed from menuItems
-        quantity: 1
-      }];
-      return newItems;
+      return [
+        ...prev,
+        { id: item.id, name: item.name, price: item.price, quantity: 1 },
+      ];
     });
   }, [session.isLocked]);
 
@@ -603,6 +655,21 @@ const CustomerMenu: React.FC = () => {
       
       // Then submit the order
       await submitOrder(tableId, source);
+      
+      // Notify admin dashboard to refresh
+      try {
+        const channel = new BroadcastChannel('restaurant-updates');
+        channel.postMessage({ type: 'order-submitted', tableId });
+        channel.close();
+      } catch (e) {
+        console.log('BroadcastChannel not supported');
+      }
+      
+      // Refresh data to update cart drawer visually
+      setTimeout(() => {
+        loadTableSessions();
+      }, 300);
+      
     toast({
       title: '✅ Поръчката е изпратена',
       description: 'Благодарим ви! Ще я приготвим скоро.',
@@ -618,7 +685,7 @@ const CustomerMenu: React.FC = () => {
     } finally {
       setIsSubmitting(false);
     }
-  }, [session.isLocked, pendingItems, isSubmitting, tableId, source, addToCart, submitOrder, toast]);
+  }, [session.isLocked, pendingItems, isSubmitting, tableId, source, addToCart, submitOrder, toast, loadTableSessions]);
 
   const handleCallWaiter = async () => {
     if (session.isLocked) return;
@@ -662,6 +729,21 @@ const CustomerMenu: React.FC = () => {
     setPaymentModalOpen(false);
     try {
       await requestBill(tableId, method, source);
+      
+      // Notify admin dashboard to refresh
+      try {
+        const channel = new BroadcastChannel('restaurant-updates');
+        channel.postMessage({ type: 'bill-requested', tableId });
+        channel.close();
+      } catch (e) {
+        console.log('BroadcastChannel not supported');
+      }
+      
+      // Refresh data to update cart drawer visually
+      setTimeout(() => {
+        loadTableSessions();
+      }, 300);
+      
     toast({
       title: '💳 Заявка за сметка',
       description: `Плащане: ${method === 'cash' ? 'В брой' : 'С карта'}`,
@@ -691,26 +773,8 @@ const CustomerMenu: React.FC = () => {
     );
   }
 
-  if (session.isLocked) {
-    return (
-      <div className="min-h-screen flex items-center justify-center p-4">
-        <div className="card-premium rounded-2xl p-8 text-center max-w-sm animate-fade-in">
-          <div className="h-16 w-16 rounded-full bg-primary/20 flex items-center justify-center mx-auto mb-4">
-            <Lock className="h-8 w-8 text-primary" />
-          </div>
-          <h2 className="font-display text-2xl font-bold mb-2">
-            Сесията е приключена
-          </h2>
-          <p className="text-muted-foreground">
-            Благодарим ви, че посетихте ATLAS HOUSE!
-          </p>
-          <p className="text-primary font-semibold mt-4 text-lg">
-            Обща сметка: {totalBill.toFixed(2)} EUR
-          </p>
-        </div>
-      </div>
-    );
-  }
+  // Show locked message as a banner instead of blocking the entire menu
+  // This allows customers to see their orders even when locked
 
   return (
     <DndContext
@@ -802,29 +866,30 @@ const CustomerMenu: React.FC = () => {
                 </div>
               </div>
               
-              {/* Bill Summary - Luxury Cart Badge */}
-              {/* Only show when there are pending items to submit OR confirmed orders */}
-              {!session.isLocked && (pendingItems.length > 0 || totalBill > 0) && (
-                <div 
-                  ref={cartDrop.setNodeRef}
-                  className={cn(
-                    "flex items-center gap-1.5 sm:gap-2 p-2 sm:p-2.5 md:p-3 bg-gradient-to-br from-card/80 to-card/60 border border-border/40 rounded-xl cursor-pointer hover:from-card hover:to-primary/5 hover:border-primary/50 transition-all touch-manipulation flex-shrink-0 min-w-[120px] sm:min-w-[140px] md:min-w-[160px] shadow-md hover:shadow-lg",
-                    cartDrop.isOver && "border-primary/70 ring-2 ring-primary/30 from-primary/10 to-primary/5"
-                  )}
-                  onClick={() => setCartDrawerOpen(true)}
-                >
-                  <div className="h-6 w-6 sm:h-7 sm:w-7 md:h-8 md:w-8 rounded-lg bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center flex-shrink-0 shadow-sm">
-                    <ShoppingBag className="h-3 w-3 sm:h-3.5 sm:w-3.5 md:h-4 md:w-4 text-primary" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    {totalItemCount > 0 && (
-                      <p className="text-[9px] sm:text-[10px] md:text-xs text-muted-foreground/80 leading-tight font-medium">
-                        {totalItemCount} {totalItemCount === 1 ? 'арт.' : 'арт.'}
-                      </p>
+              {/* Cart Badge - Opens full Cart Drawer */}
+              {!session.isLocked && (
+                <div>
+                  <div 
+                    ref={cartDrop.setNodeRef}
+                    className={cn(
+                      "flex items-center gap-1.5 sm:gap-2 p-2 sm:p-2.5 md:p-3 bg-gradient-to-br from-card/80 to-card/60 border border-border/40 rounded-xl transition-all touch-manipulation flex-shrink-0 min-w-[120px] sm:min-w-[140px] md:min-w-[160px] shadow-md cursor-pointer hover:from-card hover:to-primary/5 hover:border-primary/50",
+                      cartDrop.isOver && "border-primary/70 ring-2 ring-primary/30 from-primary/10 to-primary/5"
                     )}
-                    <p className="font-bold text-foreground text-xs sm:text-sm md:text-base truncate">
-                      {totalBill.toFixed(2)} EUR
-                    </p>
+                    onClick={() => setCartDrawerOpen(true)}
+                  >
+                    <div className="h-5 w-5 sm:h-6 sm:w-6 rounded-lg bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center flex-shrink-0 shadow-sm">
+                      <ShoppingBag className="h-2.5 w-2.5 sm:h-3 sm:w-3 text-primary" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      {totalItemCount > 0 && (
+                        <p className="text-[8px] sm:text-[9px] md:text-[10px] text-muted-foreground/80 leading-tight font-medium">
+                          {totalItemCount} {totalItemCount === 1 ? 'арт.' : 'арт.'}
+                        </p>
+                      )}
+                      <p className="font-bold text-foreground text-[10px] sm:text-xs md:text-sm truncate">
+                        {totalBill.toFixed(2)} EUR
+                      </p>
+                    </div>
                   </div>
                 </div>
               )}
@@ -833,7 +898,10 @@ const CustomerMenu: React.FC = () => {
       </header>
 
         {/* Menu - Luxury Design */}
-        <main className="max-w-3xl mx-auto px-3 sm:px-5 md:px-6 py-3 sm:py-5 md:py-6">
+        <main className={cn(
+          "max-w-3xl mx-auto px-3 sm:px-5 md:px-6 py-3 sm:py-5 md:py-6 transition-all",
+          cartDrawerOpen && "pr-0 sm:pr-[400px] md:pr-[450px]"
+        )}>
           {isMenuHidden ? (
             <div className="text-center py-16 sm:py-20">
               <div className="inline-flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-muted/20 mb-4">
@@ -907,7 +975,7 @@ const CustomerMenu: React.FC = () => {
                           quantity={getItemQuantity(item!.id)}
                           onAdd={() => handleAddItem(item!)}
                           onRemove={() => handleRemoveItem(item!.id)}
-                    disabled={session.isLocked}
+                          disabled={false}
                           isLoading={loadingItems.has(item!.id)}
                   />
                 ))}
@@ -990,66 +1058,74 @@ const CustomerMenu: React.FC = () => {
       </div>
 
       {/* Cart Drawer */}
-      <CartDrawer
-        open={cartDrawerOpen}
-        onOpenChange={setCartDrawerOpen}
-        cartItems={pendingItems.map(item => ({
-          id: item.id,
-          name: item.name,
-          price: item.price,
-          quantity: item.quantity
-        }))}
-        orderedItems={allOrderedItems.filter(item => item.fromOrder).map(item => ({
-          id: item.id,
-          name: item.name,
-          price: item.price,
-          quantity: item.quantity
-        }))}
-        total={totalBill}
-        itemCount={totalItemCount}
-        onUpdateQuantity={(itemId, quantity) => {
-          // Update pending items quantity
-          setPendingItems(prev => {
-            const existing = prev.find(p => p.id === itemId);
-            if (existing) {
-              if (quantity <= 0) {
-                return prev.filter(p => p.id !== itemId);
+      {cartDrawerOpen && (
+        <CartDrawer
+          open={cartDrawerOpen}
+          onOpenChange={setCartDrawerOpen}
+          cartItems={pendingItems.map(item => ({
+            id: item.id,
+            name: item.name,
+            price: item.price,
+            quantity: item.quantity
+          }))}
+          orderedItems={allOrderedItems.filter(item => item.fromOrder).map(item => ({
+            id: item.id,
+            name: item.name,
+            price: item.price,
+            quantity: item.quantity
+          }))}
+          total={totalBill}
+          itemCount={totalItemCount}
+          onUpdateQuantity={(itemId, quantity) => {
+            setPendingItems(prev => {
+              const existing = prev.find(p => p.id === itemId);
+              if (existing) {
+                if (quantity <= 0) {
+                  return prev.filter(p => p.id !== itemId);
+                }
+                return prev.map(p => 
+                  p.id === itemId ? { ...p, quantity } : p
+                );
               }
-              return prev.map(p => 
-                p.id === itemId ? { ...p, quantity } : p
-              );
-            }
-            return prev;
-          });
-        }}
-        onRemoveItem={(itemId) => {
-          // Remove from pending items
-          setPendingItems(prev => prev.filter(p => p.id !== itemId));
-        }}
-        onClearCart={() => {
-          // Clear pending items
-          setPendingItems([]);
-        }}
-        onReorderItems={(newOrder) => {
-          // Update pending items order
-          setPendingItems(newOrder);
-        }}
-        onReorderOrderedItems={(newOrder) => {
-          // Note: Ordered items are read-only from confirmed orders
-          // This callback is available but ordered items order doesn't affect functionality
-          // The order is preserved for display purposes only
-        }}
-        isLoading={loadingItems.size > 0}
-        disabled={session.isLocked}
-        kidsZoneFee={childTimer?.cost || 0}
-        kidsZoneTime={
-          childTimer
-            ? `${String(childTimer.hours).padStart(2, '0')}:${String(childTimer.minutes).padStart(2, '0')}:${String(childTimer.seconds).padStart(2, '0')}`
-            : undefined
-        }
-        menuDropRef={drawerDrop.setNodeRef}
-        menuDropIsOver={drawerDrop.isOver}
-      />
+              return prev;
+            });
+          }}
+          onRemoveItem={(itemId) => {
+            setPendingItems(prev => prev.filter(p => p.id !== itemId));
+          }}
+          onClearCart={() => {
+            setPendingItems([]);
+          }}
+          onReorderItems={(newOrder) => {
+            setPendingItems(newOrder);
+          }}
+          onReorderOrderedItems={(newOrder) => {
+            // Note: Ordered items are read-only from confirmed orders
+            // This callback is available but ordered items order doesn't affect functionality
+          }}
+          isLoading={loadingItems.size > 0}
+          disabled={session.isLocked}
+          kidsZoneFee={childTimer?.cost || 0}
+          kidsZoneTime={
+            childTimer
+              ? `${String(childTimer.hours).padStart(2, '0')}:${String(childTimer.minutes).padStart(2, '0')}:${String(childTimer.seconds).padStart(2, '0')}`
+              : undefined
+          }
+          kidsZoneTimerData={
+            animatorRequest
+              ? {
+                  timerStartedAt: animatorRequest.timerStartedAt,
+                  totalTimeElapsed: animatorRequest.totalTimeElapsed,
+                  childLocation: animatorRequest.childLocation,
+                  timerPausedAt: animatorRequest.timerPausedAt,
+                  hourlyRate: animatorRequest.hourlyRate,
+                }
+              : undefined
+          }
+          menuDropRef={drawerDrop.setNodeRef}
+          menuDropIsOver={drawerDrop.isOver}
+        />
+      )}
 
       {/* Payment Modal */}
       <PaymentModal

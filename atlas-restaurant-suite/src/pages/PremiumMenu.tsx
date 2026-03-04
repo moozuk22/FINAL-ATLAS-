@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Send, Bell, CreditCard, Lock, Crown, ShoppingBag, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -23,14 +23,70 @@ const PremiumMenu: React.FC = () => {
     getCartTotal,
     getCartItemCount,
     loading,
+    loadTableSessions,
+    tables,
   } = useRestaurant();
 
   const navigate = useNavigate();
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   
-  const session = getTableSession(tableId, isVip);
+  // Use useMemo to ensure session updates when tables change from real-time subscriptions
+  const session = useMemo(() => getTableSession(tableId, isVip), [tables, tableId, isVip, getTableSession]);
   const cartTotal = getCartTotal(tableId);
   const cartItemCount = getCartItemCount(tableId);
+
+  // Listen for changes from admin pages (order confirmed, table paid, etc.)
+  useEffect(() => {
+    let channel: BroadcastChannel | null = null;
+    
+    try {
+      channel = new BroadcastChannel('restaurant-updates');
+      channel.onmessage = (event) => {
+        // Only listen for events related to this table
+        if (event.data.tableId === tableId) {
+          if (event.data.type === 'order-confirmed') {
+            // Refresh data to update UI visually
+            setTimeout(() => {
+              loadTableSessions();
+            }, 300);
+            toast({
+              title: '✅ Order Confirmed',
+              description: 'Your order has been confirmed and is being prepared.',
+              duration: 3000,
+            });
+          } else if (event.data.type === 'bill-confirmed') {
+            // Refresh data to update UI visually
+            setTimeout(() => {
+              loadTableSessions();
+            }, 300);
+            toast({
+              title: '✅ Bill Accepted',
+              description: 'Your bill request has been accepted. The bill will be brought shortly.',
+              duration: 3000,
+            });
+          } else if (event.data.type === 'table-paid') {
+            // Refresh data to update UI visually
+            setTimeout(() => {
+              loadTableSessions();
+            }, 300);
+            toast({
+              title: '✅ Bill Paid',
+              description: 'Thank you! Your session has ended.',
+              duration: 5000,
+            });
+          }
+        }
+      };
+    } catch (e) {
+      console.log('BroadcastChannel not supported');
+    }
+
+    return () => {
+      if (channel) {
+        channel.close();
+      }
+    };
+  }, [tableId, toast, loadTableSessions]);
   
   const totalBill = useMemo(() => {
     return session.requests.reduce((sum, r) => sum + r.total, 0) + cartTotal;
@@ -89,6 +145,21 @@ const PremiumMenu: React.FC = () => {
     
     try {
       await submitOrder(tableId);
+      
+      // Notify admin dashboard to refresh
+      try {
+        const channel = new BroadcastChannel('restaurant-updates');
+        channel.postMessage({ type: 'order-submitted', tableId });
+        channel.close();
+      } catch (e) {
+        console.log('BroadcastChannel not supported');
+      }
+      
+      // Refresh data to update UI visually
+      setTimeout(() => {
+        loadTableSessions();
+      }, 300);
+      
     toast({
       title: '✅ Order Submitted',
       description: 'Your order is being prepared with care.',
@@ -130,6 +201,21 @@ const PremiumMenu: React.FC = () => {
     setPaymentModalOpen(false);
     try {
       await requestBill(tableId, method);
+      
+      // Notify admin dashboard to refresh
+      try {
+        const channel = new BroadcastChannel('restaurant-updates');
+        channel.postMessage({ type: 'bill-requested', tableId });
+        channel.close();
+      } catch (e) {
+        console.log('BroadcastChannel not supported');
+      }
+      
+      // Refresh data to update UI visually
+      setTimeout(() => {
+        loadTableSessions();
+      }, 300);
+      
     toast({
       title: '💳 Bill Requested',
       description: `Payment method: ${method === 'cash' ? 'Cash' : 'Card'}`,

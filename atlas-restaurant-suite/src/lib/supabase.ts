@@ -17,4 +17,23 @@ if (import.meta.env.DEV) {
   });
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Create Supabase client with real-time configuration
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  realtime: {
+    params: {
+      eventsPerSecond: 10
+    }
+  },
+  db: {
+    schema: 'public',
+  },
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+  },
+  global: {
+    headers: {
+      'x-client-info': 'atlas-restaurant-suite',
+    },
+  },
+});

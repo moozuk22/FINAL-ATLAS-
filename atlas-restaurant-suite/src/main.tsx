@@ -5,7 +5,13 @@ import "./index.css";
 // Register service worker for offline support
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   // Only register in production, skip in development
-  window.addEventListener('load', () => {
+  const registerServiceWorker = () => {
+    // Check if document is in a valid state
+    if (document.readyState === 'loading' || document.readyState === 'uninitialized') {
+      return;
+    }
+
+    try {
     navigator.serviceWorker.register('/sw.js', { 
       updateViaCache: 'none',
       scope: '/' 
@@ -29,32 +35,51 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
       })
       .catch((error) => {
         console.warn('Service Worker registration failed:', error);
-        // Unregister if registration fails
-        navigator.serviceWorker.getRegistrations().then((registrations) => {
-          registrations.forEach((reg) => reg.unregister());
-        });
+          // Silently fail - don't unregister as it might cause issues
       });
     
-    // Clean up old service workers
-    navigator.serviceWorker.getRegistrations().then((registrations) => {
+      // Clean up old service workers (with error handling)
+      navigator.serviceWorker.getRegistrations()
+        .then((registrations) => {
       registrations.forEach((registration) => {
         if (!registration.active?.scriptURL.includes('sw.js')) {
           registration.unregister().catch((err) => {
-            console.warn('Failed to unregister old service worker', err);
+                // Silently fail
           });
         }
       });
+        })
+        .catch(() => {
+          // Silently fail if getRegistrations fails
     });
-  });
+    } catch (error) {
+      // Silently handle any registration errors
+      console.warn('Service Worker registration error:', error);
+    }
+  };
+
+  if (document.readyState === 'complete') {
+    registerServiceWorker();
+  } else {
+    window.addEventListener('load', registerServiceWorker);
+  }
 } else if ('serviceWorker' in navigator && import.meta.env.DEV) {
   // Unregister service worker in development
-  navigator.serviceWorker.getRegistrations().then((registrations) => {
+  try {
+    navigator.serviceWorker.getRegistrations()
+      .then((registrations) => {
     registrations.forEach((reg) => {
-      reg.unregister().catch((err) => {
-        console.warn('Failed to unregister service worker in dev', err);
+          reg.unregister().catch(() => {
+            // Silently fail
       });
     });
+      })
+      .catch(() => {
+        // Silently fail
   });
+  } catch (error) {
+    // Silently handle errors
+  }
 }
 
 createRoot(document.getElementById("root")!).render(<App />);
