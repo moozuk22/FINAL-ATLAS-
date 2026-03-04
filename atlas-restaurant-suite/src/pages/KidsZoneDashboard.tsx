@@ -31,7 +31,7 @@ const playAlertSound = () => {
 const KidsZoneDashboard: React.FC = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { tables, completeAnimatorRequest, returnChildToTable, takeChildBackToZone, completeChildSession, loading, loadTableSessions } = useRestaurant();
+  const { tables, completeAnimatorRequest, returnChildToTable, takeChildBackToZone, completeChildSession, loading } = useRestaurant();
   const [completingRequests, setCompletingRequests] = useState<Set<string>>(new Set());
   const [returningRequests, setReturningRequests] = useState<Set<string>>(new Set());
   const [takingBackRequests, setTakingBackRequests] = useState<Set<string>>(new Set());
@@ -77,34 +77,8 @@ const KidsZoneDashboard: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Listen for changes from other tabs (StaffDashboard, etc.)
-  useEffect(() => {
-    let channel: BroadcastChannel | null = null;
-    
-    try {
-      channel = new BroadcastChannel('restaurant-updates');
-      channel.onmessage = (event) => {
-        if (event.data.type === 'child-returned-to-table' || 
-            event.data.type === 'child-back-to-zone' ||
-            event.data.type === 'animator-updated' ||
-            event.data.type === 'animator-request-accepted') {
-          // Real-time subscription will automatically update the data
-          // Just trigger a manual refresh after a short delay to ensure sync
-          setTimeout(() => {
-            loadTableSessions();
-          }, 300);
-        }
-      };
-    } catch (e) {
-      console.log('BroadcastChannel not supported');
-    }
-
-    return () => {
-      if (channel) {
-        channel.close();
-      }
-    };
-  }, [loadTableSessions]);
+  // Real-time subscriptions in RestaurantContext handle all updates automatically
+  // No need for BroadcastChannel or manual refresh
 
   // Calculate timer display for a request
   // Timer only counts when child is in kids_zone (not paused, not on table)
@@ -168,19 +142,7 @@ const KidsZoneDashboard: React.FC = () => {
     try {
       await completeAnimatorRequest(tableId, requestId, 'Аниматор');
       
-      // Send BroadcastChannel message for other tabs
-      try {
-        const channel = new BroadcastChannel('restaurant-updates');
-        channel.postMessage({ type: 'animator-request-accepted', tableId });
-        channel.close();
-      } catch (e) {
-        console.log('BroadcastChannel not supported');
-      }
-      
-      // Real-time subscription will automatically update, but trigger manual refresh to ensure sync
-      setTimeout(() => {
-        loadTableSessions();
-      }, 300);
+      // Real-time subscription will automatically update all tabs
       
       toast({
         title: '✅ Заявката е приета',
@@ -200,7 +162,7 @@ const KidsZoneDashboard: React.FC = () => {
         return next;
       });
     }
-  }, [completeAnimatorRequest, toast, completingRequests, loadTableSessions]);
+  }, [completeAnimatorRequest, toast, completingRequests]);
 
   const handleReturnChildToTable = useCallback(async (tableId: string, requestId: string) => {
     const requestKey = `${tableId}_${requestId}`;
@@ -217,18 +179,7 @@ const KidsZoneDashboard: React.FC = () => {
         title: '✅ Детето е върнато на масата',
         description: `Таймерът е паузиран за ${tableId.replace('_', ' ')}`,
       });
-      // Send BroadcastChannel message for other tabs
-      try {
-        const channel = new BroadcastChannel('restaurant-updates');
-        channel.postMessage({ type: 'child-returned-to-table', tableId });
-        channel.close();
-      } catch (e) {
-        console.log('BroadcastChannel not supported');
-      }
-      // Real-time subscription will automatically update, but trigger manual refresh to ensure sync
-      setTimeout(() => {
-        loadTableSessions();
-      }, 300);
+      // Real-time subscription will automatically update all tabs
     } catch (error) {
       console.error('Error returning child to table:', error);
       toast({
@@ -243,7 +194,7 @@ const KidsZoneDashboard: React.FC = () => {
         return next;
       });
     }
-  }, [returnChildToTable, toast, returningRequests, loadTableSessions]);
+  }, [returnChildToTable, toast, returningRequests]);
 
   const handleTakeChildBackToZone = useCallback(async (tableId: string, requestId: string) => {
     const requestKey = `${tableId}_${requestId}`;
@@ -260,18 +211,7 @@ const KidsZoneDashboard: React.FC = () => {
         title: '✅ Детето е взето обратно',
         description: `Таймерът продължава за ${tableId.replace('_', ' ')}`,
       });
-      // Send BroadcastChannel message for other tabs
-      try {
-        const channel = new BroadcastChannel('restaurant-updates');
-        channel.postMessage({ type: 'child-back-to-zone', tableId });
-        channel.close();
-      } catch (e) {
-        console.log('BroadcastChannel not supported');
-      }
-      // Real-time subscription will automatically update, but trigger manual refresh to ensure sync
-      setTimeout(() => {
-        loadTableSessions();
-      }, 300);
+      // Real-time subscription will automatically update all tabs
     } catch (error) {
       console.error('Error taking child back to zone:', error);
       toast({
@@ -286,7 +226,7 @@ const KidsZoneDashboard: React.FC = () => {
         return next;
       });
     }
-  }, [takeChildBackToZone, toast, takingBackRequests, loadTableSessions]);
+  }, [takeChildBackToZone, toast, takingBackRequests]);
 
   return (
     <div className="min-h-screen pb-20 sm:pb-24">

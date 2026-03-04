@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
-import { debounce, retryWithBackoff } from '@/utils/optimization';
+import { retryWithBackoff } from '@/utils/optimization';
 
 // Default menu items data
 export const defaultMenuItems = [
@@ -389,20 +389,14 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   useEffect(() => {
     loadTableSessions();
 
-    // OPTIMIZATION: Debounced reload to prevent excessive API calls
-    // Reduced from 500ms to 300ms for faster updates while still preventing spam
-    const debouncedReload = debounce(() => {
-      loadTableSessions();
-    }, 300);
-
-    // Set up real-time subscriptions with debouncing
+    // Set up real-time subscriptions
     const cartSubscription = supabase
       .channel('cart_changes')
       .on('postgres_changes', 
         { event: '*', schema: 'public', table: 'cart_items' },
         () => {
-          // Debounced reload to prevent excessive calls
-          debouncedReload();
+          // Immediate reload for instant cart updates
+          loadTableSessions();
         }
       )
       .subscribe();
@@ -417,9 +411,21 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         },
         (payload) => {
           console.log('Real-time table_requests change:', payload.eventType, payload);
-          // Debounced reload to prevent excessive calls
-          // This will handle INSERT, UPDATE, and DELETE events in real-time
-          debouncedReload();
+          
+          // Check if this is an animator request
+          const requestType = payload.new?.request_type || payload.old?.request_type;
+          const isAnimatorRequest = requestType === 'animator';
+          
+          if (payload.eventType === 'INSERT') {
+            // Immediate reload for new requests (animator calls, orders, etc.)
+            loadTableSessions();
+          } else if (payload.eventType === 'UPDATE') {
+            // Immediate reload for all request updates (orders, bills, animator, etc.)
+            loadTableSessions();
+          } else if (payload.eventType === 'DELETE') {
+            // Immediate reload when requests are deleted (table paid/reset, etc.)
+            loadTableSessions();
+          }
         }
       )
       .subscribe();
@@ -479,8 +485,25 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           table: 'restaurant_tables' 
         },
         () => {
-          // Debounced reload to prevent excessive calls
-          debouncedReload();
+          // Immediate reload for instant table status updates
+          loadTableSessions();
+        }
+      )
+      .subscribe();
+
+    // Real-time subscription for daily_menu_assignments changes
+    // Immediate reload for MenuEditor to see changes instantly
+    const dailyMenuSubscription = supabase
+      .channel('daily_menu_changes')
+      .on('postgres_changes',
+        { 
+          event: '*', // Listen to INSERT, UPDATE, DELETE
+          schema: 'public', 
+          table: 'daily_menu_assignments' 
+        },
+        () => {
+          // Immediate reload for MenuEditor to see daily menu changes instantly
+          loadTableSessions();
         }
       )
       .subscribe();
@@ -490,6 +513,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       supabase.removeChannel(requestsSubscription);
       supabase.removeChannel(menuSubscription);
       supabase.removeChannel(tablesSubscription);
+      supabase.removeChannel(dailyMenuSubscription);
     };
   }, [loadTableSessions]);
 
@@ -1449,6 +1473,66 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   // Call animator function
   const callAnimator = useCallback(async (tableId: string, source: 'nfc' | 'qr' | 'direct' = 'direct') => {
+    // Check if there's already an active animator request in local state
+    const currentTable = tables[tableId];
+    const existingRequest = currentTable?.requests.find(
+      req => req.requestType === 'animator' && (req.status === 'pending' || req.status === 'confirmed')
+    );
+
+    if (existingRequest) {
+      // Optimistic update: update timestamp immediately in local state
+      setTables(prev => {
+        const updated = { ...prev };
+        if (!updated[tableId]) return updated;
+        
+        updated[tableId] = {
+          ...updated[tableId],
+          requests: updated[tableId].requests.map(req =>
+            req.id === existingRequest.id ? {
+              ...req,
+              timestamp: Date.now(),
+              source: source
+            } : req
+          ),
+        };
+        
+        return updated;
+      });
+    } else {
+      // Optimistic update: add new request immediately in local state
+      const newRequestId = `req_${Date.now()}`;
+      const newRequest: TableRequest = {
+        id: newRequestId,
+        action: '🎭 АНИМАТОР ЗА ДЕТСКИ КЪТ',
+        details: 'Заявка за аниматор',
+        total: 0,
+        status: 'pending',
+        timestamp: Date.now(),
+        source: source,
+        requestType: 'animator',
+      };
+
+      setTables(prev => {
+        const updated = { ...prev };
+        if (!updated[tableId]) {
+          updated[tableId] = {
+            tableId,
+            isLocked: false,
+            cart: [],
+            requests: [],
+            isVip: false,
+          };
+        }
+        
+        updated[tableId] = {
+          ...updated[tableId],
+          requests: [...updated[tableId].requests, newRequest],
+        };
+        
+        return updated;
+      });
+    }
+
     try {
       // Check if there's already an active animator request for this table
       const { data: existingRequest } = await supabase
@@ -1463,19 +1547,26 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       if (existingRequest) {
         // If there's an active request, just update the timestamp (client is calling again)
-        await supabase
+        const { error: updateError } = await supabase
           .from('table_requests')
           .update({
             timestamp: Date.now(),
             source: source,
           })
           .eq('id', existingRequest.id);
+
+        if (updateError) {
+          // Rollback optimistic update on error
+          loadTableSessions();
+          throw updateError;
+        }
       } else {
         // Create new request only if there's no active one
-        await supabase
+        const requestId = `req_${Date.now()}`;
+        const { error: insertError } = await supabase
           .from('table_requests')
           .insert({
-            id: `req_${Date.now()}`,
+            id: requestId,
             table_id: tableId,
             action: '🎭 АНИМАТОР ЗА ДЕТСКИ КЪТ',
             details: 'Заявка за аниматор',
@@ -1485,15 +1576,49 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             source: source,
             request_type: 'animator',
           });
+
+        if (insertError) {
+          // Rollback optimistic update on error
+          loadTableSessions();
+          throw insertError;
+        }
       }
+      // Real-time subscription will sync the update, but optimistic update makes UI feel instant
     } catch (error) {
       console.error('Error calling animator:', error);
+      // Rollback optimistic update on error
+      loadTableSessions();
       throw error;
     }
-  }, []);
+  }, [tables, loadTableSessions]);
 
   // Complete animator request (only animator can do this) - starts timer
   const completeAnimatorRequest = useCallback(async (tableId: string, requestId: string, animatorName: string) => {
+    // Optimistic update: update request status immediately in local state
+    setTables(prev => {
+      const updated = { ...prev };
+      if (!updated[tableId]) return updated;
+      
+      const nowTimestamp = Date.now();
+      updated[tableId] = {
+        ...updated[tableId],
+        requests: updated[tableId].requests.map(req =>
+          req.id === requestId ? {
+            ...req,
+            status: 'confirmed' as const,
+            assignedTo: animatorName,
+            childLocation: 'kids_zone' as const,
+            timerStartedAt: nowTimestamp,
+            timerPausedAt: undefined,
+            totalTimeElapsed: 0,
+            hourlyRate: 10.00
+          } : req
+        ),
+      };
+      
+      return updated;
+    });
+
     try {
       const nowTimestamp = Date.now(); // Use timestamp (milliseconds) for BIGINT field
       const { error: updateError } = await supabase
@@ -1513,11 +1638,14 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       
       if (updateError) {
         console.error('Error completing animator request:', updateError);
+        // Rollback optimistic update on error
         loadTableSessions();
         throw updateError;
       }
+      // Real-time subscription will sync the update, but optimistic update makes UI feel instant
     } catch (error) {
       console.error('Error completing animator request:', error);
+      // Rollback optimistic update on error
       loadTableSessions();
       throw error;
     }
@@ -1575,6 +1703,35 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   // Take child back to zone - resumes timer
   const takeChildBackToZone = useCallback(async (tableId: string, requestId: string) => {
+    // Optimistic update: update request immediately in local state
+    const currentTable = tables[tableId];
+    const currentRequest = currentTable?.requests.find(r => r.id === requestId);
+    
+    if (currentRequest) {
+      const nowTimestamp = Date.now();
+      const currentElapsed = currentRequest.totalTimeElapsed || 0;
+
+      setTables(prev => {
+        const updated = { ...prev };
+        if (!updated[tableId]) return updated;
+        
+        updated[tableId] = {
+          ...updated[tableId],
+          requests: updated[tableId].requests.map(req =>
+            req.id === requestId ? {
+              ...req,
+              childLocation: 'kids_zone' as const,
+              timerStartedAt: nowTimestamp,
+              timerPausedAt: undefined,
+              totalTimeElapsed: currentElapsed // Keep existing elapsed time
+            } : req
+          ),
+        };
+        
+        return updated;
+      });
+    }
+
     try {
       const nowTimestamp = Date.now(); // Use timestamp (milliseconds) for BIGINT field
       const { error: updateError } = await supabase
@@ -1590,15 +1747,18 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       if (updateError) {
         console.error('Error taking child back to zone:', updateError);
         console.error('Update details:', { tableId, requestId, nowTimestamp });
+        // Rollback optimistic update on error
         loadTableSessions();
         throw updateError;
       }
+      // Real-time subscription will sync the update, but optimistic update makes UI feel instant
     } catch (error) {
       console.error('Error taking child back to zone:', error);
+      // Rollback optimistic update on error
       loadTableSessions();
       throw error;
     }
-  }, [loadTableSessions]);
+  }, [loadTableSessions, tables]);
 
   // Mark only bill requests as paid (leave orders untouched)
   const markBillRequestsAsPaid = useCallback(async (tableId: string) => {

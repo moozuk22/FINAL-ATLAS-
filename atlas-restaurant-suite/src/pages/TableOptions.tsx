@@ -31,36 +31,21 @@ const TableOptions: React.FC = () => {
     setCheckingDailyMenu(false);
   }, [getDailyMenuItems]);
 
+  // Initial load and re-check when getDailyMenuItems changes
+  // Real-time subscription for daily_menu_assignments in RestaurantContext triggers loadTableSessions()
+  // which updates the context, but getDailyMenuItems is a function that queries the database
+  // So we need to re-check periodically or when component mounts
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      await checkDailyMenu();
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, [checkDailyMenu]);
-
-  // Listen for daily menu changes from MenuEditor
-  useEffect(() => {
-    let channel: BroadcastChannel | null = null;
+    checkDailyMenu();
     
-    try {
-      channel = new BroadcastChannel('restaurant-updates');
-      channel.onmessage = (event) => {
-        if (event.data.type === 'daily-menu-updated') {
-          // Refresh daily menu check
-          checkDailyMenu();
-        }
-      };
-    } catch (e) {
-      console.log('BroadcastChannel not supported');
-    }
-
+    // Also set up a periodic check every 5 seconds to catch real-time changes
+    // This ensures TableOptions reacts to daily menu changes even if getDailyMenuItems doesn't change
+    const interval = setInterval(() => {
+      checkDailyMenu();
+    }, 5000);
+    
     return () => {
-      if (channel) {
-        channel.close();
-      }
+      clearInterval(interval);
     };
   }, [checkDailyMenu]);
 

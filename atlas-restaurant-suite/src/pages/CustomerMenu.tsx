@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams, useNavigate, useParams } from 'react-router-dom';
 import { Send, Bell, CreditCard, Lock, ArrowLeft, Loader2, Sparkles, ShoppingBag, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -150,62 +150,8 @@ const CustomerMenu: React.FC = () => {
     callAnimator,
     requestBill,
     loading,
-    loadTableSessions,
     tables,
   } = useRestaurant();
-
-  // Listen for changes from admin pages (order confirmed, table paid, etc.)
-  useEffect(() => {
-    let channel: BroadcastChannel | null = null;
-    
-    try {
-      channel = new BroadcastChannel('restaurant-updates');
-      channel.onmessage = (event) => {
-        // Only listen for events related to this table
-        if (event.data.tableId === tableId) {
-          if (event.data.type === 'order-confirmed') {
-            // Refresh data to update cart drawer visually
-            setTimeout(() => {
-              loadTableSessions();
-            }, 300);
-            toast({
-              title: '✅ Поръчката е потвърдена',
-              description: 'Вашата поръчка е потвърдена и се приготвя',
-              duration: 3000,
-            });
-          } else if (event.data.type === 'bill-confirmed') {
-            // Refresh data to update cart drawer visually
-            setTimeout(() => {
-              loadTableSessions();
-            }, 300);
-            toast({
-              title: '✅ Сметката е приета',
-              description: 'Вашата заявка за сметка е приета. Сметката ще бъде донесена скоро.',
-              duration: 3000,
-            });
-          } else if (event.data.type === 'table-paid') {
-            // Refresh data to update cart drawer visually
-            setTimeout(() => {
-              loadTableSessions();
-            }, 300);
-            toast({
-              title: '✅ Сметката е платена',
-              description: 'Благодарим ви! Сесията е приключена.',
-              duration: 5000,
-            });
-          }
-        }
-      };
-    } catch (e) {
-      console.log('BroadcastChannel not supported');
-    }
-
-    return () => {
-      if (channel) {
-        channel.close();
-      }
-    };
-  }, [tableId, toast, loadTableSessions]);
 
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [ratingModalOpen, setRatingModalOpen] = useState(false);
@@ -272,6 +218,50 @@ const CustomerMenu: React.FC = () => {
   
   // Use useMemo to ensure session updates when tables change from real-time subscriptions
   const session = useMemo(() => getTableSession(tableId), [tables, tableId, getTableSession]);
+
+  // Listen for changes in session state from real-time subscriptions
+  // Show toast notifications when order status changes
+  const prevSessionRef = useRef(session);
+  useEffect(() => {
+    const prevSession = prevSessionRef.current;
+    
+    // Check if order was confirmed
+    const prevPendingOrders = prevSession.requests.filter(r => r.requestType === 'order' && r.status === 'pending');
+    const currentPendingOrders = session.requests.filter(r => r.requestType === 'order' && r.status === 'pending');
+    const confirmedOrders = session.requests.filter(r => r.requestType === 'order' && r.status === 'confirmed');
+    
+    // If order status changed from pending to confirmed
+    if (prevPendingOrders.length > 0 && confirmedOrders.length > prevSession.requests.filter(r => r.requestType === 'order' && r.status === 'confirmed').length) {
+      toast({
+        title: '✅ Поръчката е потвърдена',
+        description: 'Вашата поръчка е потвърдена и се приготвя',
+        duration: 3000,
+      });
+    }
+    
+    // Check if bill was confirmed
+    const prevPendingBills = prevSession.requests.filter(r => r.requestType === 'bill' && r.status === 'pending');
+    const currentConfirmedBills = session.requests.filter(r => r.requestType === 'bill' && r.status === 'confirmed');
+    
+    if (prevPendingBills.length > 0 && currentConfirmedBills.length > prevSession.requests.filter(r => r.requestType === 'bill' && r.status === 'confirmed').length) {
+      toast({
+        title: '✅ Сметката е приета',
+        description: 'Вашата заявка за сметка е приета. Сметката ще бъде донесена скоро.',
+        duration: 3000,
+      });
+    }
+    
+    // Check if table was paid (session unlocked and requests cleared)
+    if (prevSession.isLocked && !session.isLocked && prevSession.requests.length > 0 && session.requests.length === 0) {
+      toast({
+        title: '✅ Сметката е платена',
+        description: 'Благодарим ви! Сесията е приключена.',
+        duration: 5000,
+      });
+    }
+    
+    prevSessionRef.current = session;
+  }, [session, toast]);
   
   // Get animator request status
   const animatorRequest = useMemo(() => {
@@ -656,19 +646,7 @@ const CustomerMenu: React.FC = () => {
       // Then submit the order
       await submitOrder(tableId, source);
       
-      // Notify admin dashboard to refresh
-      try {
-        const channel = new BroadcastChannel('restaurant-updates');
-        channel.postMessage({ type: 'order-submitted', tableId });
-        channel.close();
-      } catch (e) {
-        console.log('BroadcastChannel not supported');
-      }
-      
-      // Refresh data to update cart drawer visually
-      setTimeout(() => {
-        loadTableSessions();
-      }, 300);
+      // Real-time subscription will automatically update all tabs
       
     toast({
       title: '✅ Поръчката е изпратена',
@@ -685,7 +663,7 @@ const CustomerMenu: React.FC = () => {
     } finally {
       setIsSubmitting(false);
     }
-  }, [session.isLocked, pendingItems, isSubmitting, tableId, source, addToCart, submitOrder, toast, loadTableSessions]);
+  }, [session.isLocked, pendingItems, isSubmitting, tableId, source, addToCart, submitOrder, toast]);
 
   const handleCallWaiter = async () => {
     if (session.isLocked) return;
@@ -730,19 +708,7 @@ const CustomerMenu: React.FC = () => {
     try {
       await requestBill(tableId, method, source);
       
-      // Notify admin dashboard to refresh
-      try {
-        const channel = new BroadcastChannel('restaurant-updates');
-        channel.postMessage({ type: 'bill-requested', tableId });
-        channel.close();
-      } catch (e) {
-        console.log('BroadcastChannel not supported');
-      }
-      
-      // Refresh data to update cart drawer visually
-      setTimeout(() => {
-        loadTableSessions();
-      }, 300);
+      // Real-time subscription will automatically update all tabs
       
     toast({
       title: '💳 Заявка за сметка',

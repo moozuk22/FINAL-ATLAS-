@@ -32,7 +32,7 @@ const playAlertSound = () => {
 const StaffDashboard: React.FC = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { tables, completeRequest, markAsPaid, markBillRequestsAsPaid, resetTable, loading, loadTableSessions } = useRestaurant();
+  const { tables, completeRequest, markAsPaid, markBillRequestsAsPaid, resetTable, loading } = useRestaurant();
   const prevPendingCountRef = useRef<number>(0);
   const [completingRequests, setCompletingRequests] = useState<Set<string>>(new Set());
   const [markingAsPaidTables, setMarkingAsPaidTables] = useState<Set<string>>(new Set());
@@ -67,31 +67,8 @@ const StaffDashboard: React.FC = () => {
     prevPendingCountRef.current = totalPending;
   }, [totalPending]);
 
-  // Listen for order/bill submissions - real-time subscription handles updates automatically
-  useEffect(() => {
-    let channel: BroadcastChannel | null = null;
-    
-    try {
-      channel = new BroadcastChannel('restaurant-updates');
-      channel.onmessage = (event) => {
-        if (event.data.type === 'order-submitted' || event.data.type === 'bill-requested') {
-          // Real-time subscription will automatically update the data
-          // Just trigger a manual refresh after a short delay to ensure sync
-          setTimeout(() => {
-            loadTableSessions();
-          }, 300);
-        }
-      };
-    } catch (e) {
-      console.log('BroadcastChannel not supported');
-    }
-
-    return () => {
-      if (channel) {
-        channel.close();
-      }
-    };
-  }, [loadTableSessions]);
+  // Real-time subscriptions in RestaurantContext handle all updates automatically
+  // No need for BroadcastChannel or manual refresh
 
   const handleCompleteRequest = useCallback(async (tableId: string, requestId: string) => {
     const requestKey = `${tableId}_${requestId}`;
@@ -116,14 +93,7 @@ const StaffDashboard: React.FC = () => {
           title: '✅ Сметката е приета',
           description: 'Заявката за сметка е приета. Занесете сметката на масата.',
         });
-        // Send BroadcastChannel message for other tabs
-        try {
-          const channel = new BroadcastChannel('restaurant-updates');
-          channel.postMessage({ type: 'bill-confirmed', tableId });
-          channel.close();
-        } catch (e) {
-          console.log('BroadcastChannel not supported');
-        }
+        // Real-time subscription will automatically update all tabs
       } else {
         // За поръчки: потвърждаваме поръчката (status: confirmed)
         await completeRequest(tableId, requestId);
@@ -131,14 +101,7 @@ const StaffDashboard: React.FC = () => {
           title: '✅ Поръчката е потвърдена',
           description: 'Поръчката е потвърдена и се приготвя',
         });
-        // Send BroadcastChannel message for other tabs
-        try {
-          const channel = new BroadcastChannel('restaurant-updates');
-          channel.postMessage({ type: 'order-confirmed', tableId });
-          channel.close();
-        } catch (e) {
-          console.log('BroadcastChannel not supported');
-        }
+        // Real-time subscription will automatically update all tabs
       }
     } catch (error) {
       console.error('Error completing request:', error);
@@ -177,18 +140,7 @@ const StaffDashboard: React.FC = () => {
         description: `${tableName} е маркирана като платена и е отключена`,
         duration: 3000,
       });
-      // Send BroadcastChannel message for other tabs
-      try {
-        const channel = new BroadcastChannel('restaurant-updates');
-        channel.postMessage({ type: 'table-paid', tableId });
-        channel.close();
-      } catch (e) {
-        console.log('BroadcastChannel not supported');
-      }
-      // Real-time subscription will automatically update, but trigger manual refresh to ensure sync
-      setTimeout(() => {
-        loadTableSessions();
-      }, 300);
+      // Real-time subscription will automatically update all tabs
     } catch (error) {
       console.error('Error marking as paid:', error);
       toast({

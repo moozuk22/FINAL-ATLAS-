@@ -1235,14 +1235,7 @@ const MenuEditor: React.FC = () => {
       await setDailyMenuItems(selectedDate, newItemIds);
       await loadDailyMenu();
       
-      // Notify other tabs about daily menu changes
-      try {
-        const channel = new BroadcastChannel('restaurant-updates');
-        channel.postMessage({ type: 'daily-menu-updated', date: selectedDate });
-        channel.close();
-      } catch (e) {
-        console.log('BroadcastChannel not supported');
-      }
+      // Real-time subscription will automatically update all tabs
       
       toast({
         title: '✅ Добавено',
@@ -1265,14 +1258,7 @@ const MenuEditor: React.FC = () => {
       await setDailyMenuItems(selectedDate, newItemIds);
       await loadDailyMenu();
       
-      // Notify other tabs about daily menu changes
-      try {
-        const channel = new BroadcastChannel('restaurant-updates');
-        channel.postMessage({ type: 'daily-menu-updated', date: selectedDate });
-        channel.close();
-      } catch (e) {
-        console.log('BroadcastChannel not supported');
-      }
+      // Real-time subscription will automatically update all tabs
       
       toast({
         title: '✅ Премахнато',
@@ -1343,14 +1329,7 @@ const MenuEditor: React.FC = () => {
           await setDailyMenuItems(selectedDate, newItemIds);
           setDailyItems(newItems);
           
-          // Notify other tabs about daily menu changes
-          try {
-            const channel = new BroadcastChannel('restaurant-updates');
-            channel.postMessage({ type: 'daily-menu-updated', date: selectedDate });
-            channel.close();
-          } catch (e) {
-            console.log('BroadcastChannel not supported');
-          }
+          // Real-time subscription will automatically update all tabs
         } catch (error) {
           console.error('Error reordering daily menu:', error);
           toast({

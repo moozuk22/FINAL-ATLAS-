@@ -23,7 +23,6 @@ const PremiumMenu: React.FC = () => {
     getCartTotal,
     getCartItemCount,
     loading,
-    loadTableSessions,
     tables,
   } = useRestaurant();
 
@@ -35,58 +34,47 @@ const PremiumMenu: React.FC = () => {
   const cartTotal = getCartTotal(tableId);
   const cartItemCount = getCartItemCount(tableId);
 
-  // Listen for changes from admin pages (order confirmed, table paid, etc.)
+  // Listen for changes in session state from real-time subscriptions
+  // Show toast notifications when order status changes
+  const prevSessionRef = React.useRef(session);
   useEffect(() => {
-    let channel: BroadcastChannel | null = null;
+    const prevSession = prevSessionRef.current;
     
-    try {
-      channel = new BroadcastChannel('restaurant-updates');
-      channel.onmessage = (event) => {
-        // Only listen for events related to this table
-        if (event.data.tableId === tableId) {
-          if (event.data.type === 'order-confirmed') {
-            // Refresh data to update UI visually
-            setTimeout(() => {
-              loadTableSessions();
-            }, 300);
-            toast({
-              title: '✅ Order Confirmed',
-              description: 'Your order has been confirmed and is being prepared.',
-              duration: 3000,
-            });
-          } else if (event.data.type === 'bill-confirmed') {
-            // Refresh data to update UI visually
-            setTimeout(() => {
-              loadTableSessions();
-            }, 300);
-            toast({
-              title: '✅ Bill Accepted',
-              description: 'Your bill request has been accepted. The bill will be brought shortly.',
-              duration: 3000,
-            });
-          } else if (event.data.type === 'table-paid') {
-            // Refresh data to update UI visually
-            setTimeout(() => {
-              loadTableSessions();
-            }, 300);
-            toast({
-              title: '✅ Bill Paid',
-              description: 'Thank you! Your session has ended.',
-              duration: 5000,
-            });
-          }
-        }
-      };
-    } catch (e) {
-      console.log('BroadcastChannel not supported');
+    // Check if order was confirmed
+    const prevPendingOrders = prevSession.requests.filter(r => r.requestType === 'order' && r.status === 'pending');
+    const confirmedOrders = session.requests.filter(r => r.requestType === 'order' && r.status === 'confirmed');
+    
+    if (prevPendingOrders.length > 0 && confirmedOrders.length > prevSession.requests.filter(r => r.requestType === 'order' && r.status === 'confirmed').length) {
+      toast({
+        title: '✅ Order Confirmed',
+        description: 'Your order has been confirmed and is being prepared.',
+        duration: 3000,
+      });
     }
-
-    return () => {
-      if (channel) {
-        channel.close();
-      }
-    };
-  }, [tableId, toast, loadTableSessions]);
+    
+    // Check if bill was confirmed
+    const prevPendingBills = prevSession.requests.filter(r => r.requestType === 'bill' && r.status === 'pending');
+    const currentConfirmedBills = session.requests.filter(r => r.requestType === 'bill' && r.status === 'confirmed');
+    
+    if (prevPendingBills.length > 0 && currentConfirmedBills.length > prevSession.requests.filter(r => r.requestType === 'bill' && r.status === 'confirmed').length) {
+      toast({
+        title: '✅ Bill Accepted',
+        description: 'Your bill request has been accepted. The bill will be brought shortly.',
+        duration: 3000,
+      });
+    }
+    
+    // Check if table was paid
+    if (prevSession.isLocked && !session.isLocked && prevSession.requests.length > 0 && session.requests.length === 0) {
+      toast({
+        title: '✅ Bill Paid',
+        description: 'Thank you! Your session has ended.',
+        duration: 5000,
+      });
+    }
+    
+    prevSessionRef.current = session;
+  }, [session, toast]);
   
   const totalBill = useMemo(() => {
     return session.requests.reduce((sum, r) => sum + r.total, 0) + cartTotal;
@@ -146,19 +134,7 @@ const PremiumMenu: React.FC = () => {
     try {
       await submitOrder(tableId);
       
-      // Notify admin dashboard to refresh
-      try {
-        const channel = new BroadcastChannel('restaurant-updates');
-        channel.postMessage({ type: 'order-submitted', tableId });
-        channel.close();
-      } catch (e) {
-        console.log('BroadcastChannel not supported');
-      }
-      
-      // Refresh data to update UI visually
-      setTimeout(() => {
-        loadTableSessions();
-      }, 300);
+      // Real-time subscription will automatically update all tabs
       
     toast({
       title: '✅ Order Submitted',
@@ -202,19 +178,7 @@ const PremiumMenu: React.FC = () => {
     try {
       await requestBill(tableId, method);
       
-      // Notify admin dashboard to refresh
-      try {
-        const channel = new BroadcastChannel('restaurant-updates');
-        channel.postMessage({ type: 'bill-requested', tableId });
-        channel.close();
-      } catch (e) {
-        console.log('BroadcastChannel not supported');
-      }
-      
-      // Refresh data to update UI visually
-      setTimeout(() => {
-        loadTableSessions();
-      }, 300);
+      // Real-time subscription will automatically update all tabs
       
     toast({
       title: '💳 Bill Requested',
