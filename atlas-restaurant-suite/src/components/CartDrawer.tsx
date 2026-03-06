@@ -251,7 +251,7 @@ const SortableOrderedItem: React.FC<{
 
 const KIDS_ZONE_SORTABLE_ID = 'kids_zone';
 
-const SortableKidsZoneRow: React.FC<{ time?: string; fee?: number }> = ({ time, fee }) => {
+const SortableKidsZoneRow: React.FC<{ time?: string }> = ({ time }) => {
   const {
     attributes,
     listeners,
@@ -311,24 +311,7 @@ const SortableKidsZoneRow: React.FC<{ time?: string; fee?: number }> = ({ time, 
             </div>
           )}
         </div>
-        {fee !== undefined && fee > 0 && (
-          <div className="flex flex-col items-end gap-1 flex-shrink-0">
-            <span className="text-sm sm:text-base font-bold text-primary">
-              {fee.toFixed(2)} EUR
-            </span>
-          </div>
-        )}
       </div>
-      {fee !== undefined && fee > 0 && (
-        <div className="mt-2 pt-2 border-t border-border/50 flex items-center justify-between">
-          <span className="text-xs sm:text-sm font-semibold text-muted-foreground">
-            Детски кът:
-          </span>
-          <span className="text-sm sm:text-base font-bold text-primary">
-            {fee.toFixed(2)} EUR
-          </span>
-        </div>
-      )}
     </div>
   );
 };
@@ -538,30 +521,30 @@ const CartDrawer: React.FC<CartDrawerProps> = ({
           {/* Header */}
           <div className="px-4 sm:px-6 pt-5 pb-4 border-b border-border/50">
             <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3">
                 <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                  <ShoppingBag className="h-5 w-5 text-primary" />
-                </div>
-                <div>
+                <ShoppingBag className="h-5 w-5 text-primary" />
+              </div>
+              <div>
                   <h2 className="text-xl font-display font-bold">Кошница</h2>
                   <p className="text-sm text-muted-foreground">
-                    {itemCount} {itemCount === 1 ? 'артикул' : 'артикула'}
+                  {itemCount} {itemCount === 1 ? 'артикул' : 'артикула'}
                   </p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                {items.length > 0 && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={onClearCart}
-                    disabled={disabled || isLoading}
+            {items.length > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onClearCart}
+                disabled={disabled || isLoading}
                     className="text-destructive hover:text-destructive hover:bg-destructive/10 h-9"
-                  >
+              >
                     <Trash2 className="h-4 w-4 sm:mr-2" />
-                    <span className="hidden sm:inline">Изчисти</span>
-                  </Button>
-                )}
+                <span className="hidden sm:inline">Изчисти</span>
+              </Button>
+            )}
                 <Button
                   variant="ghost"
                   size="icon"
@@ -627,7 +610,7 @@ const CartDrawer: React.FC<CartDrawerProps> = ({
                       <div className="space-y-2 sm:space-y-2.5">
                         {orderedDisplayIds.map((id) => {
                           if (id === KIDS_ZONE_SORTABLE_ID) {
-                            return <SortableKidsZoneRow key={id} time={realTimeKidsZoneTime || kidsZoneTime} fee={kidsZoneFee} />;
+                            return <SortableKidsZoneRow key={id} time={realTimeKidsZoneTime || kidsZoneTime} />;
                           }
                           const item = ordered.find(i => i.id === id);
                           if (!item) return null;
@@ -713,17 +696,17 @@ const CartDrawer: React.FC<CartDrawerProps> = ({
           )}
         </div>
 
-          {/* Footer with Total */}
-          {allItems.length > 0 && (
+        {/* Footer with Total */}
+        {allItems.length > 0 && (
             <div className="border-t border-border/50 bg-background/95 backdrop-blur-sm px-4 sm:px-6 py-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-base sm:text-lg font-medium text-foreground">
-                  Общо:
-                </span>
-                <span className="font-display text-2xl sm:text-3xl font-bold text-primary">
-                  {total.toFixed(2)} EUR
-                </span>
-              </div>
+            <div className="flex items-center justify-between">
+              <span className="text-base sm:text-lg font-medium text-foreground">
+                Общо:
+              </span>
+              <span className="font-display text-2xl sm:text-3xl font-bold text-primary">
+                {total.toFixed(2)} EUR
+              </span>
+            </div>
 
               {/* Kids Zone Summary */}
               {(kidsZoneFee > 0 || realTimeKidsZoneTime || kidsZoneTime) && (
@@ -743,8 +726,8 @@ const CartDrawer: React.FC<CartDrawerProps> = ({
               <p className="text-[11px] sm:text-xs text-muted-foreground mt-1">
                 Потвърдете поръчката отдолу, когато сте готови.
               </p>
-            </div>
-          )}
+          </div>
+        )}
         </div>
       </div>
     </>

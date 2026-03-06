@@ -24,13 +24,16 @@ const PremiumMenu: React.FC = () => {
     getCartItemCount,
     loading,
     tables,
+    realtimeUpdateVersion, // Force re-render on real-time updates
+    loadTableSessions, // Manual refresh function
   } = useRestaurant();
 
   const navigate = useNavigate();
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   
   // Use useMemo to ensure session updates when tables change from real-time subscriptions
-  const session = useMemo(() => getTableSession(tableId, isVip), [tables, tableId, isVip, getTableSession]);
+  // Include realtimeUpdateVersion to force re-render on real-time updates
+  const session = useMemo(() => getTableSession(tableId, isVip), [tables, tableId, isVip, getTableSession, realtimeUpdateVersion]);
   const cartTotal = getCartTotal(tableId);
   const cartItemCount = getCartItemCount(tableId);
 
@@ -134,6 +137,9 @@ const PremiumMenu: React.FC = () => {
     try {
       await submitOrder(tableId);
       
+      // Refresh page data after submitting order
+      await loadTableSessions();
+      
       // Real-time subscription will automatically update all tabs
       
     toast({
@@ -159,10 +165,12 @@ const PremiumMenu: React.FC = () => {
     
     try {
       await callWaiter(tableId);
-    toast({
-      title: '🔔 Staff Notified',
-      description: 'Someone will be with you shortly.',
-    });
+      // Refresh page data after calling waiter
+      await loadTableSessions();
+      toast({
+        title: '🔔 Staff Notified',
+        description: 'Someone will be with you shortly.',
+      });
     } catch (error) {
       console.error('Error calling waiter:', error);
       toast({
@@ -177,6 +185,9 @@ const PremiumMenu: React.FC = () => {
     setPaymentModalOpen(false);
     try {
       await requestBill(tableId, method);
+      
+      // Refresh page data after requesting bill
+      await loadTableSessions();
       
       // Real-time subscription will automatically update all tabs
       

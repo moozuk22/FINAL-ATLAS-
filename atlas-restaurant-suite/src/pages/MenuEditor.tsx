@@ -506,7 +506,7 @@ const NewCategorySection: React.FC<{
 const MenuEditor: React.FC = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { menuItems, addMenuItem, updateMenuItem, deleteMenuItem, getDailyMenuItems, setDailyMenuItems, loading } = useRestaurant();
+  const { menuItems, addMenuItem, updateMenuItem, deleteMenuItem, getDailyMenuItems, setDailyMenuItems, loading, realtimeUpdateVersion } = useRestaurant();
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [formData, setFormData] = useState({
@@ -1202,6 +1202,7 @@ const MenuEditor: React.FC = () => {
     try {
       const items = await getDailyMenuItems(selectedDate);
       setDailyItems(items);
+      // BroadcastChannel handles instant updates to all tabs
     } catch (error) {
       console.error('Error loading daily menu:', error);
       toast({
@@ -1466,6 +1467,9 @@ const MenuEditor: React.FC = () => {
                     <DialogTitle>
                       {editingItem ? 'Edit Menu Item' : 'Add Menu Item'}
                     </DialogTitle>
+                    <DialogDescription>
+                      {editingItem ? 'Update the menu item details below' : 'Fill in the details to add a new menu item'}
+                    </DialogDescription>
                   </DialogHeader>
                   <div className="space-y-4 py-4">
                     <div>

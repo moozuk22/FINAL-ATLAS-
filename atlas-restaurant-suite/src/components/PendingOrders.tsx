@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { useRestaurant } from '@/context/RestaurantContext';
 import { Clock } from 'lucide-react';
@@ -10,8 +10,9 @@ interface PendingOrdersProps {
 }
 
 const PendingOrders: React.FC<PendingOrdersProps> = ({ open, onClose }) => {
-  const { getPendingOrders } = useRestaurant();
-  const pendingOrders = getPendingOrders();
+  const { getPendingOrders, tables } = useRestaurant();
+  // Memoize pending orders to react to real-time table updates
+  const pendingOrders = useMemo(() => getPendingOrders(), [getPendingOrders, tables]);
 
   return (
     <Dialog open={open} onOpenChange={onClose}>

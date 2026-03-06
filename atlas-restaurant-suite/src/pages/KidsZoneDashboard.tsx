@@ -31,7 +31,7 @@ const playAlertSound = () => {
 const KidsZoneDashboard: React.FC = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { tables, completeAnimatorRequest, returnChildToTable, takeChildBackToZone, completeChildSession, loading } = useRestaurant();
+  const { tables, completeAnimatorRequest, returnChildToTable, takeChildBackToZone, completeChildSession, loading, realtimeUpdateVersion } = useRestaurant();
   const [completingRequests, setCompletingRequests] = useState<Set<string>>(new Set());
   const [returningRequests, setReturningRequests] = useState<Set<string>>(new Set());
   const [takingBackRequests, setTakingBackRequests] = useState<Set<string>>(new Set());
@@ -46,6 +46,7 @@ const KidsZoneDashboard: React.FC = () => {
   );
 
   // Get animator requests (pending only)
+  // Include realtimeUpdateVersion to force re-render on real-time updates
   const animatorRequests = useMemo(() => {
     const requests: Array<{ tableId: string; request: any }> = [];
     Object.values(tables).forEach(table => {
@@ -56,7 +57,7 @@ const KidsZoneDashboard: React.FC = () => {
       });
     });
     return requests;
-  }, [tables]);
+  }, [tables, realtimeUpdateVersion]);
 
   // Count pending animator requests
   const pendingAnimatorCount = useMemo(() => animatorRequests.length, [animatorRequests]);
@@ -175,11 +176,11 @@ const KidsZoneDashboard: React.FC = () => {
     
     try {
       await returnChildToTable(tableId, requestId);
+      // Optimistic update + BroadcastChannel handles instant UI updates
       toast({
         title: '✅ Детето е върнато на масата',
         description: `Таймерът е паузиран за ${tableId.replace('_', ' ')}`,
       });
-      // Real-time subscription will automatically update all tabs
     } catch (error) {
       console.error('Error returning child to table:', error);
       toast({
@@ -285,7 +286,7 @@ const KidsZoneDashboard: React.FC = () => {
               
               return (
                 <div
-                  key={tableId}
+                  key={`${tableId}_${realtimeUpdateVersion}`}
                   className={cn(
                     'card-premium rounded-xl overflow-hidden transition-all relative',
                     hasPendingRequest && 'border-destructive pulse-alert',

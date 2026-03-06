@@ -6,6 +6,7 @@ import { useRestaurant } from '@/context/RestaurantContext';
 import { useToast } from '@/hooks/use-toast';
 import { Trash2, Edit2, Check, X } from 'lucide-react';
 import { MenuItem } from '@/context/RestaurantContext';
+import { supabase } from '@/lib/supabase';
 
 interface DailyMenuEditorProps {
   open: boolean;
@@ -13,7 +14,7 @@ interface DailyMenuEditorProps {
 }
 
 const DailyMenuEditor: React.FC<DailyMenuEditorProps> = ({ open, onClose }) => {
-  const { menuItems, getDailyMenuItems, setDailyMenuItems } = useRestaurant();
+  const { menuItems, getDailyMenuItems, setDailyMenuItems, loadTableSessions } = useRestaurant();
   const { toast } = useToast();
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [dailyItems, setDailyItems] = useState<MenuItem[]>([]);
@@ -27,6 +28,8 @@ const DailyMenuEditor: React.FC<DailyMenuEditorProps> = ({ open, onClose }) => {
     try {
       const items = await getDailyMenuItems(selectedDate);
       setDailyItems(items);
+      // Refresh all pages after loading daily menu
+      await loadTableSessions();
     } catch (error) {
       console.error('Error loading daily menu:', error);
       toast({
@@ -37,12 +40,40 @@ const DailyMenuEditor: React.FC<DailyMenuEditorProps> = ({ open, onClose }) => {
     } finally {
       setLoading(false);
     }
-  }, [selectedDate, getDailyMenuItems, toast]);
+  }, [selectedDate, getDailyMenuItems, loadTableSessions, toast]);
 
   useEffect(() => {
     if (open) {
       loadDailyMenu();
     }
+  }, [open, loadDailyMenu]);
+
+  // Real-time subscription for daily_menu_assignments changes
+  // Reload daily menu when changes occur
+  useEffect(() => {
+    if (!open) return; // Only subscribe when dialog is open
+
+    const dailyMenuSubscription = supabase
+      .channel('daily_menu_editor_realtime')
+      .on('postgres_changes',
+        { 
+          event: '*',
+          schema: 'public', 
+          table: 'daily_menu_assignments' 
+        },
+        (payload) => {
+          console.log('📅 DailyMenuEditor: Real-time daily_menu_assignments change:', payload.eventType);
+          // Reload daily menu when changes occur
+          loadDailyMenu();
+        }
+      )
+      .subscribe((status) => {
+        console.log('📡 DailyMenuEditor subscription status:', status);
+      });
+
+    return () => {
+      supabase.removeChannel(dailyMenuSubscription);
+    };
   }, [open, loadDailyMenu]);
 
   const handleAddToDaily = async (item: MenuItem) => {

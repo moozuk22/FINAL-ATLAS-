@@ -6,6 +6,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from '@/components/ui/dialog';
 
 interface PaymentModalProps {
@@ -38,6 +39,9 @@ const PaymentModal: React.FC<PaymentModalProps> = ({
           <DialogTitle className={`text-center ${variant === 'premium' ? 'font-display text-2xl' : 'text-xl'}`}>
             {variant === 'premium' ? 'Select Payment' : 'Изберете плащане'}
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            {variant === 'premium' ? 'Choose your payment method' : 'Изберете метод на плащане'}
+          </DialogDescription>
         </DialogHeader>
         
         <div className="py-4">

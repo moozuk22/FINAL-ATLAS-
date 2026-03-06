@@ -11,6 +11,7 @@ import RatingModal from '@/components/RatingModal';
 import { trackQRScan } from '@/utils/analytics';
 import { triggerHapticFeedback, isOnline } from '@/utils/optimization';
 import { cn } from '@/lib/utils';
+import { supabase } from '@/lib/supabase';
 import {
   DndContext,
   DragOverlay,
@@ -136,7 +137,7 @@ const CustomerMenu: React.FC = () => {
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
-
+  
   const {
     menuItems,
     getDailyMenuItems,
@@ -151,6 +152,8 @@ const CustomerMenu: React.FC = () => {
     requestBill,
     loading,
     tables,
+    realtimeUpdateVersion, // Force re-render on real-time updates
+    loadTableSessions, // Manual refresh function
   } = useRestaurant();
 
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
@@ -201,6 +204,46 @@ const CustomerMenu: React.FC = () => {
     };
   }, [getDailyMenuItems]);
 
+  // Real-time subscription for daily_menu_assignments changes
+  // Reload daily menu when changes occur (real-time page reload)
+  useEffect(() => {
+    const reloadDailyMenu = async () => {
+      setDailyMenuLoading(true);
+      const items = await getDailyMenuItems();
+      setDailyMenuItems(items);
+      // Update category order
+      const order: Record<string, string[]> = {};
+      items.forEach((it) => {
+        const category = it.cat && it.cat.trim() ? it.cat.trim() : '📦 Други';
+        if (!order[category]) order[category] = [];
+        order[category].push(it.id);
+      });
+      setDailyCategoryOrder(order);
+      setDailyMenuLoading(false);
+    };
+
+    const dailyMenuSubscription = supabase
+      .channel('customer_menu_daily_realtime')
+      .on('postgres_changes',
+        { 
+          event: '*',
+          schema: 'public', 
+          table: 'daily_menu_assignments' 
+        },
+        (payload) => {
+          console.log('📅 CustomerMenu: Real-time daily_menu_assignments change:', payload.eventType);
+          reloadDailyMenu();
+        }
+      )
+      .subscribe((status) => {
+        console.log('📡 CustomerMenu daily menu subscription status:', status);
+      });
+
+    return () => {
+      supabase.removeChannel(dailyMenuSubscription);
+    };
+  }, [getDailyMenuItems]);
+
   const dndSensors = useSensors(
     useSensor(PointerSensor, {
       // Prevent accidental drags when tapping +/- or scrolling
@@ -217,7 +260,14 @@ const CustomerMenu: React.FC = () => {
   );
   
   // Use useMemo to ensure session updates when tables change from real-time subscriptions
-  const session = useMemo(() => getTableSession(tableId), [tables, tableId, getTableSession]);
+  // Include realtimeUpdateVersion to force re-render on real-time updates
+  const session = useMemo(() => {
+    // #region agent log
+    const sessionData = getTableSession(tableId);
+    fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'CustomerMenu.tsx:263',message:'session useMemo recalculated',data:{tableId,realtimeUpdateVersion,hasTables:!!tables,tableKeys:Object.keys(tables||{}),sessionCartCount:sessionData.cart.length,sessionRequestsCount:sessionData.requests.length},timestamp:Date.now(),runId:'run1',hypothesisId:'G'})}).catch(()=>{});
+    // #endregion
+    return sessionData;
+  }, [tables, tableId, getTableSession, realtimeUpdateVersion]);
 
   // Listen for changes in session state from real-time subscriptions
   // Show toast notifications when order status changes
@@ -261,12 +311,13 @@ const CustomerMenu: React.FC = () => {
     }
     
     prevSessionRef.current = session;
-  }, [session, toast]);
+  }, [session, toast, realtimeUpdateVersion]); // Include realtimeUpdateVersion to ensure effect runs on updates
   
   // Get animator request status
+  // Include realtimeUpdateVersion to force re-render on real-time updates
   const animatorRequest = useMemo(() => {
     return session.requests.find(req => req.requestType === 'animator');
-  }, [session.requests]);
+  }, [session.requests, realtimeUpdateVersion]);
 
   // Calculate timer for animator request
   const childTimer = useMemo(() => {
@@ -310,7 +361,7 @@ const CustomerMenu: React.FC = () => {
     const kidsZoneFee = childTimer?.cost || 0;
     
     return confirmedOrdersTotal + pendingTotal + kidsZoneFee;
-  }, [session.requests, pendingItems, menuItems, childTimer]);
+  }, [session.requests, pendingItems, menuItems, childTimer, realtimeUpdateVersion]); // Include realtimeUpdateVersion to force re-render
   
   // Calculate pending items total separately for display
   const pendingItemsTotal = useMemo(() => {
@@ -351,6 +402,7 @@ const CustomerMenu: React.FC = () => {
 
   // Combine all ordered items (from confirmed orders + cart)
   // Always use latest prices from menuItems
+  // Include realtimeUpdateVersion to force re-render on real-time updates
   const allOrderedItems = useMemo(() => {
     const items: Array<{ id: string; name: string; price: number; quantity: number; fromOrder?: boolean }> = [];
     
@@ -434,7 +486,7 @@ const CustomerMenu: React.FC = () => {
     });
     
     return items;
-  }, [session.requests, pendingItems, menuItems]);
+  }, [session.requests, pendingItems, menuItems, realtimeUpdateVersion]); // Include realtimeUpdateVersion to force re-render
 
   // Group menu items by category - memoized with proper dependency
   const groupedItems = useMemo(() => {
@@ -450,11 +502,11 @@ const CustomerMenu: React.FC = () => {
       acc[category].push(item);
       return acc;
     }, {} as Record<string, MenuItem[]>);
-  }, [dailyMenuItems]);
+  }, [dailyMenuItems, realtimeUpdateVersion]); // Include realtimeUpdateVersion to force re-render
 
   const dailyItemsById = useMemo(() => {
     return new Map(dailyMenuItems.map((i) => [i.id, i] as const));
-  }, [dailyMenuItems]);
+  }, [dailyMenuItems, realtimeUpdateVersion]); // Include realtimeUpdateVersion to force re-render
 
   const cartDrop = useDroppable({ id: 'cart_drop' });
   const drawerDrop = useDroppable({ id: 'cart_drawer_drop' });
@@ -464,6 +516,7 @@ const CustomerMenu: React.FC = () => {
   }, [activeMenuDragId, dailyItemsById]);
 
   // Filter out empty categories and sort them
+  // Include realtimeUpdateVersion to force re-render on real-time updates
   const sortedCategories = useMemo(() => {
     return Object.entries(groupedItems)
       .filter(([_, items]) => items.length > 0)
@@ -475,7 +528,7 @@ const CustomerMenu: React.FC = () => {
         if (!aHasEmoji && bHasEmoji) return 1;
         return a.localeCompare(b);
       });
-  }, [groupedItems]);
+  }, [groupedItems, realtimeUpdateVersion]); // Include realtimeUpdateVersion to force re-render
 
   // Create a map of item quantities for faster lookup
   // Only use pending items (cart items are only added when order is submitted)
@@ -625,36 +678,45 @@ const CustomerMenu: React.FC = () => {
     if (session.isLocked || pendingItems.length === 0 || isSubmitting) return;
     
     setIsSubmitting(true);
-    try {
-      // First, add all pending items to cart
-      if (pendingItems.length > 0) {
-        for (const item of pendingItems) {
-          // Add each item with its quantity
-          for (let i = 0; i < item.quantity; i++) {
-            await addToCart(tableId, {
-      id: item.id,
-      name: item.name,
-      price: item.price,
-      quantity: 1,
-    });
-          }
-        }
-        // Clear pending items
-        setPendingItems([]);
-      }
-      
-      // Then submit the order
-      await submitOrder(tableId, source);
-      
-      // Real-time subscription will automatically update all tabs
-      
+    
+    // INSTANT: Show success toast immediately (0ms) - optimistic feedback
     toast({
       title: '✅ Поръчката е изпратена',
       description: 'Благодарим ви! Ще я приготвим скоро.',
     });
+    
+    // INSTANT: Clear pending items immediately (0ms) - optimistic update
+    const itemsToSubmit = [...pendingItems];
+    setPendingItems([]);
+    
+    try {
+      // Background: Add all pending items to cart in parallel (faster than sequential)
+      if (itemsToSubmit.length > 0) {
+        // Add items in parallel for speed
+        await Promise.all(
+          itemsToSubmit.flatMap(item =>
+            Array(item.quantity).fill(null).map(() =>
+              addToCart(tableId, {
+                id: item.id,
+                name: item.name,
+                price: item.price,
+                quantity: 1,
+              })
+            )
+          )
+        );
+      }
+      
+      // Background: Submit the order (optimistic update already shows it on StaffDashboard)
+      // Note: submitOrder() has optimistic updates - UI updates instantly
+      await submitOrder(tableId, source);
+      
+      // Real-time subscription will automatically update all tabs
       // Note: Cart is cleared but order history remains in requests
     } catch (error) {
       console.error('Error submitting order:', error);
+      // Restore pending items on error
+      setPendingItems(itemsToSubmit);
       toast({
         title: 'Грешка',
         description: 'Неуспешно изпращане на поръчка. Моля опитайте отново.',
@@ -669,11 +731,12 @@ const CustomerMenu: React.FC = () => {
     if (session.isLocked) return;
     
     try {
+      // Note: callWaiter() already calls loadTableSessions() internally
       await callWaiter(tableId, source);
-    toast({
-      title: '🔔 Сервитьорът е повикан',
-      description: 'Моля, изчакайте.',
-    });
+      toast({
+        title: '🔔 Сервитьорът е повикан',
+        description: 'Моля, изчакайте.',
+      });
     } catch (error) {
       console.error('Error calling waiter:', error);
       toast({
@@ -688,6 +751,7 @@ const CustomerMenu: React.FC = () => {
     if (session.isLocked) return;
     
     try {
+      // Note: callAnimator() already calls loadTableSessions() internally
       await callAnimator(tableId, source);
       toast({
         title: '🎭 Заявка за аниматор',
@@ -706,6 +770,7 @@ const CustomerMenu: React.FC = () => {
   const handlePaymentSelect = async (method: 'cash' | 'card') => {
     setPaymentModalOpen(false);
     try {
+      // Note: requestBill() already calls loadTableSessions() internally
       await requestBill(tableId, method, source);
       
       // Real-time subscription will automatically update all tabs
@@ -835,26 +900,26 @@ const CustomerMenu: React.FC = () => {
               {/* Cart Badge - Opens full Cart Drawer */}
               {!session.isLocked && (
                 <div>
-                  <div 
-                    ref={cartDrop.setNodeRef}
-                    className={cn(
+                <div 
+                  ref={cartDrop.setNodeRef}
+                  className={cn(
                       "flex items-center gap-1.5 sm:gap-2 p-2 sm:p-2.5 md:p-3 bg-gradient-to-br from-card/80 to-card/60 border border-border/40 rounded-xl transition-all touch-manipulation flex-shrink-0 min-w-[120px] sm:min-w-[140px] md:min-w-[160px] shadow-md cursor-pointer hover:from-card hover:to-primary/5 hover:border-primary/50",
-                      cartDrop.isOver && "border-primary/70 ring-2 ring-primary/30 from-primary/10 to-primary/5"
-                    )}
-                    onClick={() => setCartDrawerOpen(true)}
-                  >
+                    cartDrop.isOver && "border-primary/70 ring-2 ring-primary/30 from-primary/10 to-primary/5"
+                  )}
+                  onClick={() => setCartDrawerOpen(true)}
+                >
                     <div className="h-5 w-5 sm:h-6 sm:w-6 rounded-lg bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center flex-shrink-0 shadow-sm">
                       <ShoppingBag className="h-2.5 w-2.5 sm:h-3 sm:w-3 text-primary" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      {totalItemCount > 0 && (
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    {totalItemCount > 0 && (
                         <p className="text-[8px] sm:text-[9px] md:text-[10px] text-muted-foreground/80 leading-tight font-medium">
-                          {totalItemCount} {totalItemCount === 1 ? 'арт.' : 'арт.'}
-                        </p>
-                      )}
-                      <p className="font-bold text-foreground text-[10px] sm:text-xs md:text-sm truncate">
-                        {totalBill.toFixed(2)} EUR
+                        {totalItemCount} {totalItemCount === 1 ? 'арт.' : 'арт.'}
                       </p>
+                    )}
+                      <p className="font-bold text-foreground text-[10px] sm:text-xs md:text-sm truncate">
+                      {totalBill.toFixed(2)} EUR
+                    </p>
                     </div>
                   </div>
                 </div>
@@ -1025,58 +1090,58 @@ const CustomerMenu: React.FC = () => {
 
       {/* Cart Drawer */}
       {cartDrawerOpen && (
-        <CartDrawer
-          open={cartDrawerOpen}
-          onOpenChange={setCartDrawerOpen}
-          cartItems={pendingItems.map(item => ({
-            id: item.id,
-            name: item.name,
-            price: item.price,
-            quantity: item.quantity
-          }))}
-          orderedItems={allOrderedItems.filter(item => item.fromOrder).map(item => ({
-            id: item.id,
-            name: item.name,
-            price: item.price,
-            quantity: item.quantity
-          }))}
-          total={totalBill}
-          itemCount={totalItemCount}
-          onUpdateQuantity={(itemId, quantity) => {
-            setPendingItems(prev => {
-              const existing = prev.find(p => p.id === itemId);
-              if (existing) {
-                if (quantity <= 0) {
-                  return prev.filter(p => p.id !== itemId);
-                }
-                return prev.map(p => 
-                  p.id === itemId ? { ...p, quantity } : p
-                );
+      <CartDrawer
+        open={cartDrawerOpen}
+        onOpenChange={setCartDrawerOpen}
+        cartItems={pendingItems.map(item => ({
+          id: item.id,
+          name: item.name,
+          price: item.price,
+          quantity: item.quantity
+        }))}
+        orderedItems={allOrderedItems.filter(item => item.fromOrder).map(item => ({
+          id: item.id,
+          name: item.name,
+          price: item.price,
+          quantity: item.quantity
+        }))}
+        total={totalBill}
+        itemCount={totalItemCount}
+        onUpdateQuantity={(itemId, quantity) => {
+          setPendingItems(prev => {
+            const existing = prev.find(p => p.id === itemId);
+            if (existing) {
+              if (quantity <= 0) {
+                return prev.filter(p => p.id !== itemId);
               }
-              return prev;
-            });
-          }}
-          onRemoveItem={(itemId) => {
-            setPendingItems(prev => prev.filter(p => p.id !== itemId));
-          }}
-          onClearCart={() => {
-            setPendingItems([]);
-          }}
-          onReorderItems={(newOrder) => {
-            setPendingItems(newOrder);
-          }}
-          onReorderOrderedItems={(newOrder) => {
-            // Note: Ordered items are read-only from confirmed orders
-            // This callback is available but ordered items order doesn't affect functionality
-          }}
-          isLoading={loadingItems.size > 0}
-          disabled={session.isLocked}
-          kidsZoneFee={childTimer?.cost || 0}
-          kidsZoneTime={
-            childTimer
-              ? `${String(childTimer.hours).padStart(2, '0')}:${String(childTimer.minutes).padStart(2, '0')}:${String(childTimer.seconds).padStart(2, '0')}`
-              : undefined
-          }
+              return prev.map(p => 
+                p.id === itemId ? { ...p, quantity } : p
+              );
+            }
+            return prev;
+          });
+        }}
+        onRemoveItem={(itemId) => {
+          setPendingItems(prev => prev.filter(p => p.id !== itemId));
+        }}
+        onClearCart={() => {
+          setPendingItems([]);
+        }}
+        onReorderItems={(newOrder) => {
+          setPendingItems(newOrder);
+        }}
+        onReorderOrderedItems={(newOrder) => {
+          // Note: Ordered items are read-only from confirmed orders
+          // This callback is available but ordered items order doesn't affect functionality
+        }}
+        isLoading={loadingItems.size > 0}
+        disabled={session.isLocked}
+        kidsZoneFee={childTimer?.cost || 0}
+        kidsZoneTime={
+          childTimer
+            ? `${String(childTimer.hours).padStart(2, '0')}:${String(childTimer.minutes).padStart(2, '0')}:${String(childTimer.seconds).padStart(2, '0')}`
+            : undefined
+        }
           kidsZoneTimerData={
             animatorRequest
               ? {
@@ -1088,9 +1153,9 @@ const CustomerMenu: React.FC = () => {
                 }
               : undefined
           }
-          menuDropRef={drawerDrop.setNodeRef}
-          menuDropIsOver={drawerDrop.isOver}
-        />
+        menuDropRef={drawerDrop.setNodeRef}
+        menuDropIsOver={drawerDrop.isOver}
+      />
       )}
 
       {/* Payment Modal */}

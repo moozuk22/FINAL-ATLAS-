@@ -32,11 +32,56 @@ const playAlertSound = () => {
 const StaffDashboard: React.FC = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { tables, completeRequest, markAsPaid, markBillRequestsAsPaid, resetTable, loading } = useRestaurant();
+  const { tables, completeRequest, markAsPaid, markBillRequestsAsPaid, resetTable, loading, realtimeUpdateVersion, loadTableSessions } = useRestaurant();
   const prevPendingCountRef = useRef<number>(0);
+  const prevTotalRequestsRef = useRef<number>(0);
+  const prevRequestIdsRef = useRef<Set<string>>(new Set());
   const [completingRequests, setCompletingRequests] = useState<Set<string>>(new Set());
   const [markingAsPaidTables, setMarkingAsPaidTables] = useState<Set<string>>(new Set());
   const [revenueReportOpen, setRevenueReportOpen] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  
+  // Register instant (0ms) new order detection callback
+  useEffect(() => {
+    // Access the callback ref through window (exposed by RestaurantContext)
+    const onNewOrderCallbackRef = (window as any).onNewOrderCallbackRef;
+    if (onNewOrderCallbackRef) {
+      // Register our callback for instant feedback
+      const instantFeedbackCallback = (requestType: string, tableId: string) => {
+        const callbackStart = performance.now();
+        console.log(`⚡ INSTANT (0ms) new order detected! Type: ${requestType}, Table: ${tableId}`);
+        
+        // Immediately show visual feedback (0ms delay)
+        setIsRefreshing(true);
+        
+        // Immediately play sound (0ms delay)
+        try {
+          playAlertSound();
+          console.log(`🔊 Alert sound played instantly`);
+        } catch (error) {
+          console.error('Failed to play alert sound:', error);
+        }
+        
+        // Reset visual feedback after 2 seconds
+        setTimeout(() => {
+          setIsRefreshing(false);
+        }, 2000);
+        
+        const callbackDuration = performance.now() - callbackStart;
+        console.log(`✅ Instant feedback completed in ${callbackDuration.toFixed(3)}ms`);
+      };
+      
+      onNewOrderCallbackRef.current = instantFeedbackCallback;
+      console.log('✅ Instant (0ms) new order callback registered');
+      
+      return () => {
+        // Cleanup
+        if (onNewOrderCallbackRef) {
+          onNewOrderCallbackRef.current = null;
+        }
+      };
+    }
+  }, []);
   
   // Get all table IDs in order - memoized
   const tableIds = useMemo(() => 
@@ -46,29 +91,126 @@ const StaffDashboard: React.FC = () => {
   );
 
   // Count total pending requests - memoized
+  // Include realtimeUpdateVersion to force re-render on real-time updates
   const totalPending = useMemo(() => {
     return Object.values(tables).reduce((count, table) => {
       return count + table.requests.filter(r => r.status === 'pending').length;
     }, 0);
-  }, [tables]);
+  }, [tables, realtimeUpdateVersion]);
 
   // Calculate total revenue - memoized
+  // Include realtimeUpdateVersion to force re-render on real-time updates
   const totalRevenue = useMemo(() => {
     return Object.values(tables).reduce((sum, table) => {
       return sum + table.requests.reduce((reqSum, r) => reqSum + r.total, 0);
     }, 0);
-  }, [tables]);
+  }, [tables, realtimeUpdateVersion]);
 
-  // Play sound when new pending requests appear
+  // Get all request IDs for change detection
+  const allRequestIds = useMemo(() => {
+    const ids = new Set<string>();
+    Object.values(tables).forEach(table => {
+      table.requests.forEach(req => ids.add(req.id));
+    });
+    return ids;
+  }, [tables, realtimeUpdateVersion]);
+
+  // Count total requests (all types) for change detection
+  const totalRequests = useMemo(() => {
+    return Object.values(tables).reduce((count, table) => {
+      return count + table.requests.length;
+    }, 0);
+  }, [tables, realtimeUpdateVersion]);
+
+  // Track previous realtimeUpdateVersion to detect changes
+  const prevRealtimeVersionRef = useRef<number>(0);
+  
+  // Auto-refresh when new orders arrive (detect by request IDs or count change)
   useEffect(() => {
-    if (totalPending > prevPendingCountRef.current) {
-      playAlertSound();
+    const currentRequestIds = allRequestIds;
+    const prevRequestIds = prevRequestIdsRef.current;
+    
+    // Skip initial render (when refs are empty) to avoid false positives
+    if (prevRequestIds.size === 0 && currentRequestIds.size > 0) {
+      // Initial load - just update refs, don't trigger refresh
+      prevRequestIdsRef.current = new Set(currentRequestIds);
+      prevPendingCountRef.current = totalPending;
+      prevTotalRequestsRef.current = totalRequests;
+      prevRealtimeVersionRef.current = realtimeUpdateVersion;
+      return;
     }
-    prevPendingCountRef.current = totalPending;
-  }, [totalPending]);
+    
+    // Check if new requests arrived (new IDs that weren't there before)
+    const hasNewRequests = Array.from(currentRequestIds).some(id => !prevRequestIds.has(id));
+    const requestCountChanged = totalRequests !== prevTotalRequestsRef.current;
+    const pendingIncreased = totalPending > prevPendingCountRef.current;
+    
+    if (hasNewRequests || requestCountChanged) {
+      // New orders detected - show visual feedback
+      // Real-time subscriptions already handle the refresh automatically
+      const newRequestIds = Array.from(currentRequestIds).filter(id => !prevRequestIds.has(id));
+      console.log(`🔄 New orders detected - showing visual feedback...`, {
+        newRequestIds,
+        totalPending,
+        prevPending: prevPendingCountRef.current,
+        pendingIncreased,
+      });
+      
+      // Always show visual feedback for new requests
+      setIsRefreshing(true);
+      
+      // Play sound if pending count increased (new pending requests)
+      if (pendingIncreased) {
+        console.log('🔊 Playing alert sound - pending requests increased');
+        try {
+          playAlertSound();
+        } catch (error) {
+          console.error('Failed to play alert sound:', error);
+        }
+      }
+      
+      // Don't call loadTableSessions() here - real-time subscriptions already handle refresh
+      // Just show visual feedback
+      
+      // Reset visual feedback after 2 seconds
+      const timeoutId = setTimeout(() => {
+        setIsRefreshing(false);
+        console.log('✅ Visual feedback reset');
+      }, 2000);
+      
+      // Update refs
+      prevRequestIdsRef.current = new Set(currentRequestIds);
+      prevPendingCountRef.current = totalPending;
+      prevTotalRequestsRef.current = totalRequests;
+      
+      return () => clearTimeout(timeoutId);
+    } else {
+      // Just update refs if no new requests
+      prevRequestIdsRef.current = new Set(currentRequestIds);
+      prevPendingCountRef.current = totalPending;
+      prevTotalRequestsRef.current = totalRequests;
+    }
+  }, [allRequestIds, totalRequests, totalPending, realtimeUpdateVersion]);
+  
+  // Also refresh when realtimeUpdateVersion changes (indicates data was updated)
+  useEffect(() => {
+    // Show visual feedback when data updates (but only if version actually changed)
+    if (realtimeUpdateVersion > prevRealtimeVersionRef.current && prevRealtimeVersionRef.current > 0) {
+      console.log(`🔄 Real-time update detected (version ${prevRealtimeVersionRef.current} → ${realtimeUpdateVersion}) - showing visual feedback`);
+      setIsRefreshing(true);
+      const timeoutId = setTimeout(() => {
+        setIsRefreshing(false);
+      }, 1500);
+      prevRealtimeVersionRef.current = realtimeUpdateVersion;
+      return () => clearTimeout(timeoutId);
+    } else if (realtimeUpdateVersion > prevRealtimeVersionRef.current) {
+      // First update - just track it
+      prevRealtimeVersionRef.current = realtimeUpdateVersion;
+    }
+  }, [realtimeUpdateVersion]);
 
   // Real-time subscriptions in RestaurantContext handle all updates automatically
-  // No need for BroadcastChannel or manual refresh
+  // They only refresh when database changes occur, ensuring seamless updates
 
   const handleCompleteRequest = useCallback(async (tableId: string, requestId: string) => {
     const requestKey = `${tableId}_${requestId}`;
@@ -96,11 +238,11 @@ const StaffDashboard: React.FC = () => {
         // Real-time subscription will automatically update all tabs
       } else {
         // За поръчки: потвърждаваме поръчката (status: confirmed)
-        await completeRequest(tableId, requestId);
-        toast({
-          title: '✅ Поръчката е потвърдена',
-          description: 'Поръчката е потвърдена и се приготвя',
-        });
+      await completeRequest(tableId, requestId);
+      toast({
+        title: '✅ Поръчката е потвърдена',
+        description: 'Поръчката е потвърдена и се приготвя',
+      });
         // Real-time subscription will automatically update all tabs
       }
     } catch (error) {
@@ -131,16 +273,25 @@ const StaffDashboard: React.FC = () => {
       return;
     }
     
+    const markStart = performance.now();
     setMarkingAsPaidTables(prev => new Set(prev).add(tableId));
     
     try {
+      console.log(`💰 Marking ${tableId} as paid...`);
       await markAsPaid(tableId);
+      const markDuration = performance.now() - markStart;
+      console.log(`✅ Table ${tableId} marked as paid in ${markDuration.toFixed(2)}ms`);
+      
+      // Show visual feedback
+      setIsRefreshing(true);
+      setTimeout(() => setIsRefreshing(false), 1000);
+      
       toast({
         title: '✅ Платено',
         description: `${tableName} е маркирана като платена и е отключена`,
         duration: 3000,
       });
-      // Real-time subscription will automatically update all tabs
+      // markAsPaid() already calls loadTableSessions() internally for instant refresh
     } catch (error) {
       console.error('Error marking as paid:', error);
       toast({
@@ -283,7 +434,7 @@ const StaffDashboard: React.FC = () => {
             
             return (
               <TableCard
-                key={tableId}
+                key={`${tableId}_${realtimeUpdateVersion}`}
                 session={session}
                 onCompleteRequest={(requestId) => handleCompleteRequest(tableId, requestId)}
                 onMarkAsPaid={() => handleMarkAsPaid(tableId)}

@@ -1,8 +1,9 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Utensils, ArrowRight, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useRestaurant } from '@/context/RestaurantContext';
+import { supabase } from '@/lib/supabase';
 
 const TableOptions: React.FC = () => {
   const { tableNumber } = useParams();
@@ -10,6 +11,9 @@ const TableOptions: React.FC = () => {
   const { getDailyMenuItems } = useRestaurant();
   const [checkingDailyMenu, setCheckingDailyMenu] = useState(true);
   const [hasDailyMenu, setHasDailyMenu] = useState(false);
+  
+  // Ref to store the latest checkDailyMenu function for subscription
+  const checkDailyMenuRef = useRef<() => Promise<void>>();
 
   // Convert /t/1 to Table_01 format
   const getTableId = () => {
@@ -25,29 +29,54 @@ const TableOptions: React.FC = () => {
   const tableId = getTableId();
 
   const checkDailyMenu = useCallback(async () => {
-    setCheckingDailyMenu(true);
-    const items = await getDailyMenuItems(); // today + is_visible=true
-    setHasDailyMenu(items.length > 0);
-    setCheckingDailyMenu(false);
+      setCheckingDailyMenu(true);
+      const items = await getDailyMenuItems(); // today + is_visible=true
+      setHasDailyMenu(items.length > 0);
+      setCheckingDailyMenu(false);
   }, [getDailyMenuItems]);
 
-  // Initial load and re-check when getDailyMenuItems changes
-  // Real-time subscription for daily_menu_assignments in RestaurantContext triggers loadTableSessions()
-  // which updates the context, but getDailyMenuItems is a function that queries the database
-  // So we need to re-check periodically or when component mounts
+  // Update ref whenever checkDailyMenu changes
+  useEffect(() => {
+    checkDailyMenuRef.current = checkDailyMenu;
+  }, [checkDailyMenu]);
+
+  // Initial load on mount
   useEffect(() => {
     checkDailyMenu();
-    
-    // Also set up a periodic check every 5 seconds to catch real-time changes
-    // This ensures TableOptions reacts to daily menu changes even if getDailyMenuItems doesn't change
-    const interval = setInterval(() => {
-      checkDailyMenu();
-    }, 5000);
-    
-    return () => {
-      clearInterval(interval);
-    };
   }, [checkDailyMenu]);
+
+  // Real-time subscription for daily_menu_assignments changes
+  // This ensures TableOptions reacts instantly to daily menu changes without intervals
+  useEffect(() => {
+    // Helper function to call the latest checkDailyMenu
+    const recheckDailyMenu = () => {
+      if (checkDailyMenuRef.current) {
+        checkDailyMenuRef.current();
+      }
+    };
+
+    const dailyMenuSubscription = supabase
+      .channel('table_options_daily_menu')
+      .on('postgres_changes',
+        { 
+          event: '*', // Listen to INSERT, UPDATE, DELETE
+          schema: 'public', 
+          table: 'daily_menu_assignments' 
+        },
+        (payload) => {
+          console.log('Real-time daily_menu_assignments change in TableOptions:', payload.eventType);
+          // Re-check daily menu when changes occur
+          recheckDailyMenu();
+        }
+      )
+      .subscribe((status) => {
+        console.log('📡 TableOptions daily menu subscription status:', status);
+      });
+
+    return () => {
+      supabase.removeChannel(dailyMenuSubscription);
+    };
+  }, []); // Empty dependency array - subscription should only be created once
 
   return (
     <div className="min-h-screen flex items-center justify-center p-6 bg-background">

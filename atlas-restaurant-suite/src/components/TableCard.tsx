@@ -24,6 +24,7 @@ const TableCard: React.FC<TableCardProps> = ({
   markingAsPaidTables = new Set(),
 }) => {
   // Memoize calculations for performance
+  // Include session object to ensure re-calculation when any part of session changes
   const { pendingRequests, completedRequests, hasPending, hasActionablePending, hasActivity, billPaid, totalBill, status, hasBillRequest } = useMemo(() => {
     // Show both pending and confirmed requests in the list
     const pending = session.requests.filter(r => r.status === 'pending' || r.status === 'confirmed');
@@ -56,7 +57,7 @@ const TableCard: React.FC<TableCardProps> = ({
     else status = 'free';
     
     return { pendingRequests: pending, completedRequests: completed, hasPending, hasActionablePending, hasActivity, billPaid, totalBill, status, hasBillRequest };
-  }, [session.requests]);
+  }, [session]); // Use entire session object to ensure updates when any property changes
 
   return (
     <div
@@ -77,10 +78,14 @@ const TableCard: React.FC<TableCardProps> = ({
         </div>
         
         <div className="flex items-center gap-2 flex-shrink-0">
-          {hasBillRequest && !session.isLocked && (
+          {/* Show "Платено" button whenever table has any orders/requests */}
+          {hasActivity && (
             <Button
               size="sm"
-              className="btn-gold text-xs h-8 sm:h-9 px-2 sm:px-3 touch-manipulation"
+              className={cn(
+                "text-xs h-8 sm:h-9 px-2 sm:px-3 touch-manipulation",
+                hasBillRequest ? "btn-gold" : "bg-primary hover:bg-primary/90"
+              )}
               onClick={onMarkAsPaid}
               disabled={markingAsPaidTables.has(session.tableId)}
               aria-label={`Mark ${session.tableId} as paid`}
@@ -115,12 +120,12 @@ const TableCard: React.FC<TableCardProps> = ({
               .sort((a, b) => b.timestamp - a.timestamp)
               .map(request => {
                 return (
-                  <RequestRow
-                    key={request.id}
-                    request={request}
-                    onComplete={() => onCompleteRequest(request.id)}
-                    isCompleting={completingRequests.has(`${session.tableId}_${request.id}`)}
-                  />
+                <RequestRow
+                  key={request.id}
+                  request={request}
+                  onComplete={() => onCompleteRequest(request.id)}
+                  isCompleting={completingRequests.has(`${session.tableId}_${request.id}`)}
+                />
                 );
               })}
           </div>
@@ -142,5 +147,56 @@ const TableCard: React.FC<TableCardProps> = ({
   );
 };
 
-// OPTIMIZATION: Memoize TableCard to prevent unnecessary re-renders
-export default memo(TableCard);
+// OPTIMIZATION: Memoize TableCard with custom comparison to ensure it updates when orders change
+// Compare session.requests array length and IDs to detect changes
+export default memo(TableCard, (prevProps, nextProps) => {
+  // Re-render if session object reference changed
+  if (prevProps.session !== nextProps.session) {
+    return false; // false means "not equal" - should re-render
+  }
+  
+  // Re-render if requests array changed (length or content)
+  const prevRequestIds = prevProps.session.requests.map(r => r.id).join(',');
+  const nextRequestIds = nextProps.session.requests.map(r => r.id).join(',');
+  if (prevRequestIds !== nextRequestIds) {
+    return false; // Should re-render
+  }
+  
+  // Re-render if request statuses changed
+  const prevStatuses = prevProps.session.requests.map(r => `${r.id}:${r.status}`).join(',');
+  const nextStatuses = nextProps.session.requests.map(r => `${r.id}:${r.status}`).join(',');
+  if (prevStatuses !== nextStatuses) {
+    return false; // Should re-render
+  }
+  
+  // Re-render if other session properties changed
+  if (
+    prevProps.session.isLocked !== nextProps.session.isLocked ||
+    prevProps.session.isVip !== nextProps.session.isVip ||
+    prevProps.session.cart.length !== nextProps.session.cart.length
+  ) {
+    return false; // Should re-render
+  }
+  
+  // Re-render if callback functions changed (shouldn't happen, but check anyway)
+  if (
+    prevProps.onCompleteRequest !== nextProps.onCompleteRequest ||
+    prevProps.onMarkAsPaid !== nextProps.onMarkAsPaid ||
+    prevProps.onFreeTable !== nextProps.onFreeTable
+  ) {
+    return false; // Should re-render
+  }
+  
+  // Re-render if completing/marking sets changed
+  const prevCompleting = Array.from(prevProps.completingRequests || []).sort().join(',');
+  const nextCompleting = Array.from(nextProps.completingRequests || []).sort().join(',');
+  const prevMarking = Array.from(prevProps.markingAsPaidTables || []).sort().join(',');
+  const nextMarking = Array.from(nextProps.markingAsPaidTables || []).sort().join(',');
+  
+  if (prevCompleting !== nextCompleting || prevMarking !== nextMarking) {
+    return false; // Should re-render
+  }
+  
+  // No changes detected - skip re-render
+  return true; // true means "equal" - skip re-render
+});

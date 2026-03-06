@@ -93,6 +93,7 @@ interface RestaurantContextType {
   tables: Record<string, TableSession>;
   menuItems: MenuItem[];
   loading: boolean;
+  realtimeUpdateVersion: number; // Version counter that increments on real-time updates to force re-renders
   getTableSession: (tableId: string, isVip?: boolean) => TableSession;
   addToCart: (tableId: string, item: CartItem) => Promise<void>;
   removeFromCart: (tableId: string, itemId: string) => Promise<void>;
@@ -179,6 +180,208 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [loading, setLoading] = useState(true);
   const [paidTables, setPaidTables] = useState<Set<string>>(new Set()); // Track tables that were just marked as paid
   const [lastCleanup, setLastCleanup] = useState<number>(0); // Track last cleanup time
+  const [realtimeUpdateVersion, setRealtimeUpdateVersion] = useState<number>(0); // Force re-render on real-time updates
+  
+  // Ref to store the latest loadTableSessions function for subscriptions
+  const loadTableSessionsRef = useRef<() => Promise<void>>();
+  // Ref to store current tables for change detection (avoids dependency issues)
+  const tablesRef = useRef<Record<string, TableSession>>(tables);
+  // Ref to store instant new order callback (0ms detection)
+  const onNewOrderCallbackRef = useRef<((requestType: string, tableId: string) => void) | null>(null);
+  
+  // BroadcastChannel for instant cross-tab/cross-window communication (0ms, no database)
+  const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
+  
+  // Initialize BroadcastChannel for instant frontend-to-frontend updates
+  useEffect(() => {
+    // Create broadcast channel for instant updates across all browser tabs/windows
+    const channel = new BroadcastChannel('atlas-restaurant-updates');
+    broadcastChannelRef.current = channel;
+    
+    // Listen for updates from other tabs/windows
+    channel.onmessage = (event) => {
+      const { type, payload, timestamp } = event.data;
+      const receiveTime = performance.now();
+      console.log(`📡 BroadcastChannel received: ${type} (latency: ${Date.now() - timestamp}ms)`);
+      
+      if (type === 'NEW_REQUEST') {
+        // Instantly update local state with the new request (0ms, no database)
+        const { tableId, request } = payload;
+        
+        setTables(prev => {
+          const updated = { ...prev };
+          if (!updated[tableId]) {
+            updated[tableId] = {
+              tableId,
+              isLocked: false,
+              cart: [],
+              requests: [],
+              isVip: false,
+            };
+          }
+          
+          // Check if request already exists (avoid duplicates)
+          const exists = updated[tableId].requests.some(r => 
+            r.id === request.id || 
+            (r.timestamp === request.timestamp && r.requestType === request.requestType)
+          );
+          
+          if (!exists) {
+            updated[tableId] = {
+              ...updated[tableId],
+              requests: [...updated[tableId].requests, request],
+            };
+            console.log(`⚡ INSTANT UPDATE (0ms): Added ${request.requestType} to ${tableId} via BroadcastChannel`);
+          }
+          
+          return updated;
+        });
+        
+        // Update refs
+        tablesRef.current = {
+          ...tablesRef.current,
+          [tableId]: {
+            ...tablesRef.current[tableId] || {
+              tableId,
+              isLocked: false,
+              cart: [],
+              requests: [],
+              isVip: false,
+            },
+            requests: [...(tablesRef.current[tableId]?.requests || []), request],
+          },
+        };
+        
+        // Force re-render
+        setRealtimeUpdateVersion(prev => prev + 1);
+        
+        // Trigger instant feedback (sound, visual)
+        if (onNewOrderCallbackRef.current && request.status === 'pending') {
+          try {
+            onNewOrderCallbackRef.current(request.requestType || 'unknown', tableId);
+            console.log(`🔊 Instant feedback triggered via BroadcastChannel`);
+          } catch (error) {
+            console.error('Error in instant feedback callback:', error);
+          }
+        }
+      } else if (type === 'REQUEST_UPDATED') {
+        // Instantly update request status (0ms, no database)
+        const { tableId, requestId, updates } = payload;
+        
+        setTables(prev => {
+          const updated = { ...prev };
+          if (updated[tableId]) {
+            updated[tableId] = {
+              ...updated[tableId],
+              requests: updated[tableId].requests.map(req =>
+                req.id === requestId ? { ...req, ...updates } : req
+              ),
+            };
+          }
+          return updated;
+        });
+        
+        setRealtimeUpdateVersion(prev => prev + 1);
+        console.log(`⚡ INSTANT UPDATE (0ms): Updated ${requestId} in ${tableId} via BroadcastChannel`);
+      } else if (type === 'TABLE_CLEARED') {
+        // Instantly clear table (0ms, no database)
+        const { tableId } = payload;
+        
+        setTables(prev => {
+          const updated = { ...prev };
+          if (updated[tableId]) {
+            updated[tableId] = {
+              ...updated[tableId],
+              isLocked: false,
+              requests: [],
+              cart: [],
+            };
+          }
+          return updated;
+        });
+        
+        setRealtimeUpdateVersion(prev => prev + 1);
+        console.log(`⚡ INSTANT UPDATE (0ms): Cleared ${tableId} via BroadcastChannel`);
+      } else if (type === 'CART_UPDATED') {
+        // Instantly update cart (0ms, no database)
+        const { tableId, cart } = payload;
+        
+        setTables(prev => {
+          const updated = { ...prev };
+          if (updated[tableId]) {
+            updated[tableId] = {
+              ...updated[tableId],
+              cart: cart,
+            };
+          }
+          return updated;
+        });
+        
+        setRealtimeUpdateVersion(prev => prev + 1);
+      } else if (type === 'MENU_ITEM_ADDED') {
+        // Instantly add menu item (0ms, no database)
+        const { item } = payload;
+        
+        setMenuItems(prev => {
+          // Check if item already exists
+          if (prev.some(i => i.id === item.id)) return prev;
+          return [...prev, item];
+        });
+        
+        console.log(`⚡ INSTANT UPDATE (0ms): Menu item added via BroadcastChannel - ${item.name}`);
+      } else if (type === 'MENU_ITEM_UPDATED') {
+        // Instantly update menu item (0ms, no database)
+        const { id, updates } = payload;
+        
+        setMenuItems(prev => prev.map(item =>
+          item.id === id ? { ...item, ...updates } : item
+        ));
+        
+        console.log(`⚡ INSTANT UPDATE (0ms): Menu item updated via BroadcastChannel - ID: ${id}`);
+      } else if (type === 'MENU_ITEM_DELETED') {
+        // Instantly delete menu item (0ms, no database)
+        const { id } = payload;
+        
+        setMenuItems(prev => prev.filter(item => item.id !== id));
+        
+        console.log(`⚡ INSTANT UPDATE (0ms): Menu item deleted via BroadcastChannel - ID: ${id}`);
+      } else if (type === 'DAILY_MENU_UPDATED') {
+        // Instantly update daily menu (0ms, no database)
+        // This triggers a re-render for components watching menuItems
+        setRealtimeUpdateVersion(prev => prev + 1);
+        
+        console.log(`⚡ INSTANT UPDATE (0ms): Daily menu updated via BroadcastChannel`);
+      }
+    };
+    
+    console.log('📡 BroadcastChannel initialized for instant frontend-to-frontend updates');
+    
+    return () => {
+      channel.close();
+      broadcastChannelRef.current = null;
+      console.log('📡 BroadcastChannel closed');
+    };
+  }, []);
+  
+  // Helper function to broadcast updates to all tabs/windows (0ms)
+  const broadcastUpdate = useCallback((type: string, payload: any) => {
+    if (broadcastChannelRef.current) {
+      broadcastChannelRef.current.postMessage({
+        type,
+        payload,
+        timestamp: Date.now(),
+      });
+      console.log(`📡 BroadcastChannel sent: ${type}`);
+    }
+  }, []);
+  
+  // Expose callback ref to window for StaffDashboard to register
+  useEffect(() => {
+    (window as any).onNewOrderCallbackRef = onNewOrderCallbackRef;
+    return () => {
+      delete (window as any).onNewOrderCallbackRef;
+    };
+  }, []);
 
   // Load menu items from Supabase
   useEffect(() => {
@@ -221,9 +424,16 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   }, []);
 
   // Load table sessions from Supabase
-  const loadTableSessions = useCallback(async () => {
+  // silent: if true, don't show loading spinner (for seamless real-time updates)
+  const loadTableSessions = useCallback(async (silent: boolean = false) => {
+    // #region agent log
+    fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:229',message:'loadTableSessions called',data:{timestamp:Date.now(),callStack:new Error().stack?.split('\n').slice(0,5).join('|')},timestamp:Date.now(),runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
     try {
-      setLoading(true);
+      // Only show loading spinner if not silent (for initial load or manual refresh)
+      if (!silent) {
+        setLoading(true);
+      }
       
       // OPTIMIZATION: Only cleanup completed requests periodically (every 5 minutes)
       // This reduces unnecessary database operations
@@ -272,7 +482,9 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         });
         // Fallback to default tables
         setTables(defaultTables);
-        setLoading(false);
+        if (!silent) {
+          setLoading(false);
+        }
         return;
       }
 
@@ -376,146 +588,494 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         };
   });
 
-      setTables(sessions);
-      setLoading(false);
+      // Create a completely new object to ensure React detects the change
+      const newTables = { ...sessions };
+      
+      // OPTIMIZATION: Only update state if data actually changed
+      // This prevents unnecessary re-renders and ensures seamless updates
+      const currentTablesJson = JSON.stringify(tablesRef.current);
+      const newTablesJson = JSON.stringify(newTables);
+      const hasChanges = currentTablesJson !== newTablesJson;
+      
+      if (hasChanges) {
+        // #region agent log
+        const tableKeys = Object.keys(newTables);
+        const tableCounts = tableKeys.map(k => ({tableId:k,requests:newTables[k].requests.length,cart:newTables[k].cart.length}));
+        fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:386',message:'setTables called with new data',data:{tableCount:tableKeys.length,tableCounts,newTablesRef:Object.keys(newTables).join(','),sessionsRef:Object.keys(sessions).join(',')},timestamp:Date.now(),runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+        // #endregion
+        setTables(newTables);
+        // Update ref with new tables
+        tablesRef.current = newTables;
+        // Increment version AFTER setTables to force re-render of all components
+        setRealtimeUpdateVersion(prev => {
+          const newVersion = prev + 1;
+          console.log(`🔄 Real-time update version incremented: ${prev} → ${newVersion} (tables updated)`);
+          // #region agent log
+          fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:392',message:'realtimeUpdateVersion incremented',data:{prev,newVersion},timestamp:Date.now(),runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+          // #endregion
+          return newVersion;
+        });
+      } else if (!silent) {
+        // Only log if not silent and no changes (for debugging)
+        console.log('ℹ️ No changes detected, skipping state update');
+      }
+      
+      if (!silent) {
+        setLoading(false);
+      }
     } catch (error) {
       console.error('Error loading table sessions:', error);
       // Fallback to default tables on error
-      setTables(defaultTables);
-      setLoading(false);
+      const fallbackTables = { ...defaultTables };
+      setTables(fallbackTables);
+      // Increment version even on error to trigger re-render
+      setRealtimeUpdateVersion(prev => prev + 1);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, [lastCleanup, paidTables]); // paidTables is used in filter
+
+  // Update refs whenever they change
+  useEffect(() => {
+    loadTableSessionsRef.current = loadTableSessions;
+    tablesRef.current = tables;
+  }, [loadTableSessions, tables]);
 
   useEffect(() => {
     loadTableSessions();
 
-    // Set up real-time subscriptions
-    const cartSubscription = supabase
-      .channel('cart_changes')
-      .on('postgres_changes', 
-        { event: '*', schema: 'public', table: 'cart_items' },
-        () => {
-          // Immediate reload for instant cart updates
-          loadTableSessions();
-        }
-      )
-      .subscribe();
+    // Helper function to call the latest loadTableSessions
+    // Uses silent mode for seamless real-time updates (no loading spinner)
+    const reloadData = (source?: string) => {
+      const startTime = performance.now();
+      // #region agent log
+      fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:414',message:'reloadData called',data:{hasRef:!!loadTableSessionsRef.current,source},timestamp:Date.now(),runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+      // #endregion
+      if (loadTableSessionsRef.current) {
+        console.log(`🔄 Reloading table sessions from real-time update (silent)${source ? ` - triggered by: ${source}` : ''}...`);
+        // Use silent mode for seamless updates - no loading spinner, only updates if data changed
+        loadTableSessionsRef.current(true).then(() => {
+          const duration = performance.now() - startTime;
+          console.log(`✅ Reload completed in ${duration.toFixed(2)}ms${source ? ` (triggered by: ${source})` : ''}`);
+        }).catch((error) => {
+          console.error(`❌ Reload failed${source ? ` (triggered by: ${source})` : ''}:`, error);
+        });
+      } else {
+        console.warn('⚠️ loadTableSessionsRef.current is not available');
+        // #region agent log
+        fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:420',message:'ERROR: loadTableSessionsRef.current is null',data:{},timestamp:Date.now(),runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+        // #endregion
+      }
+    };
 
-    const requestsSubscription = supabase
-      .channel('requests_changes')
-      .on('postgres_changes',
-        { 
-          event: '*', // Listen to INSERT, UPDATE, DELETE
-          schema: 'public', 
-          table: 'table_requests' 
-        },
-        (payload) => {
-          console.log('Real-time table_requests change:', payload.eventType, payload);
-          
-          // Check if this is an animator request
-          const requestType = payload.new?.request_type || payload.old?.request_type;
-          const isAnimatorRequest = requestType === 'animator';
-          
-          if (payload.eventType === 'INSERT') {
-            // Immediate reload for new requests (animator calls, orders, etc.)
-            loadTableSessions();
-          } else if (payload.eventType === 'UPDATE') {
-            // Immediate reload for all request updates (orders, bills, animator, etc.)
-            loadTableSessions();
-          } else if (payload.eventType === 'DELETE') {
-            // Immediate reload when requests are deleted (table paid/reset, etc.)
-            loadTableSessions();
+    // Track subscription statuses for monitoring and reconnection
+    type SubscriptionStatus = 'SUBSCRIBED' | 'CHANNEL_ERROR' | 'TIMED_OUT' | 'CLOSED';
+    type SubscriptionName = 'cart' | 'requests' | 'menu' | 'tables' | 'dailyMenu';
+    
+    const subscriptionStatuses: Record<SubscriptionName, SubscriptionStatus> = {
+      cart: 'SUBSCRIBED',
+      requests: 'SUBSCRIBED',
+      menu: 'SUBSCRIBED',
+      tables: 'SUBSCRIBED',
+      dailyMenu: 'SUBSCRIBED',
+    };
+
+    // Track subscription timing logs
+    interface SubscriptionLog {
+      name: SubscriptionName;
+      event: 'SUBSCRIBED' | 'EVENT' | 'ERROR' | 'RECONNECT';
+      timestamp: number;
+      details?: string;
+    }
+    
+    const subscriptionLogs: SubscriptionLog[] = [];
+    const MAX_LOGS = 100; // Keep last 100 logs
+    
+    const addSubscriptionLog = (name: SubscriptionName, event: SubscriptionLog['event'], details?: string) => {
+      const log: SubscriptionLog = {
+        name,
+        event,
+        timestamp: Date.now(),
+        details,
+      };
+      subscriptionLogs.push(log);
+      if (subscriptionLogs.length > MAX_LOGS) {
+        subscriptionLogs.shift();
+      }
+      
+      const timeStr = new Date(log.timestamp).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 });
+      console.log(`[${timeStr}] 📊 Subscription Log: ${name} - ${event}${details ? ` - ${details}` : ''}`);
+      
+      // Store in window for debugging
+      (window as any).subscriptionLogs = subscriptionLogs;
+      (window as any).getSubscriptionLogs = () => {
+        console.table(subscriptionLogs.map(log => ({
+          Time: new Date(log.timestamp).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 }),
+          Subscription: log.name,
+          Event: log.event,
+          Details: log.details || '-',
+        })));
+        return subscriptionLogs;
+      };
+    };
+
+    // Function to handle subscription errors and reconnect
+    const handleSubscriptionError = (subscriptionName: SubscriptionName, channel: any, setupFn: () => any) => {
+      const errorTime = performance.now();
+      console.error(`❌ ${subscriptionName} subscription error - attempting reconnection...`);
+      subscriptionStatuses[subscriptionName] = 'CHANNEL_ERROR';
+      addSubscriptionLog(subscriptionName, 'ERROR', 'Connection error - attempting reconnection');
+      
+      // Remove old channel
+      supabase.removeChannel(channel);
+      
+      // Reconnect after a short delay
+      setTimeout(() => {
+        const reconnectTime = performance.now();
+        const timeSinceError = (reconnectTime - errorTime).toFixed(2);
+        console.log(`🔄 Reconnecting ${subscriptionName} subscription (${timeSinceError}ms after error)...`);
+        addSubscriptionLog(subscriptionName, 'RECONNECT', `Reconnecting after ${timeSinceError}ms`);
+        const reconnectStart = performance.now();
+        const newChannel = setupFn();
+        newChannel.subscribe((status: string) => {
+          const reconnectDuration = performance.now() - reconnectStart;
+          subscriptionStatuses[subscriptionName] = status as SubscriptionStatus;
+          if (status === 'SUBSCRIBED') {
+            console.log(`✅ ${subscriptionName} subscription reconnected successfully (took ${reconnectDuration.toFixed(2)}ms)`);
+            addSubscriptionLog(subscriptionName, 'SUBSCRIBED', `Reconnected successfully (${reconnectDuration.toFixed(2)}ms)`);
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            addSubscriptionLog(subscriptionName, 'ERROR', `Reconnection failed: ${status}`);
+            handleSubscriptionError(subscriptionName, newChannel, setupFn);
           }
-        }
-      )
-      .subscribe();
+        });
+      }, 2000);
+    };
+
+    // Set up real-time subscriptions with enhanced error handling and reconnection
+    const setupCartSubscription = () => {
+      const setupTime = performance.now();
+      addSubscriptionLog('cart', 'SUBSCRIBED', 'Setting up cart subscription');
+      return supabase
+        .channel('cart_changes')
+        .on('postgres_changes', 
+          { event: '*', schema: 'public', table: 'cart_items' },
+          (payload) => {
+            const eventTime = performance.now();
+            const timeSinceSetup = (eventTime - setupTime).toFixed(2);
+            console.log(`🛒 Real-time cart_items change (${timeSinceSetup}ms after setup):`, payload.eventType, payload);
+            addSubscriptionLog('cart', 'EVENT', `${payload.eventType} - table_id: ${payload.new?.table_id || payload.old?.table_id || 'unknown'}`);
+            // #region agent log
+            fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:430',message:'Cart subscription callback fired',data:{eventType:payload.eventType,hasNew:!!payload.new,hasOld:!!payload.old},timestamp:Date.now(),runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+            // #endregion
+            // Immediate reload for instant cart updates
+            reloadData('cart subscription');
+          }
+        );
+    };
+
+    const cartSubscription = setupCartSubscription();
+    const cartSubscribeStart = performance.now();
+    cartSubscription.subscribe((status) => {
+      const subscribeTime = performance.now() - cartSubscribeStart;
+      console.log(`📡 Cart subscription status: ${status} (took ${subscribeTime.toFixed(2)}ms to subscribe)`);
+      subscriptionStatuses.cart = status as any;
+      addSubscriptionLog('cart', status === 'SUBSCRIBED' ? 'SUBSCRIBED' : 'ERROR', `Status: ${status} (${subscribeTime.toFixed(2)}ms)`);
+      // #region agent log
+      fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:436',message:'Cart subscription status changed',data:{status},timestamp:Date.now(),runId:'run1',hypothesisId:'I'})}).catch(()=>{});
+      // #endregion
+      
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        addSubscriptionLog('cart', 'ERROR', `Connection failed: ${status}`);
+        handleSubscriptionError('cart', cartSubscription, setupCartSubscription);
+      }
+    });
+
+    // Most critical subscription - handles all order/request updates
+    const setupRequestsSubscription = () => {
+      const setupTime = performance.now();
+      addSubscriptionLog('requests', 'SUBSCRIBED', 'Setting up requests subscription');
+      return supabase
+        .channel('requests_changes')
+        .on('postgres_changes',
+          { 
+            event: '*', // Listen to INSERT, UPDATE, DELETE
+            schema: 'public', 
+            table: 'table_requests' 
+          },
+          (payload) => {
+            const eventTime = performance.now();
+            const timeSinceSetup = (eventTime - setupTime).toFixed(2);
+            const requestType = payload.new?.request_type || payload.old?.request_type;
+            const tableId = payload.new?.table_id || payload.old?.table_id || 'unknown';
+            console.log(`🔔 Real-time table_requests change (${timeSinceSetup}ms after setup):`, payload.eventType, `type: ${requestType}, table: ${tableId}`);
+            addSubscriptionLog('requests', 'EVENT', `${payload.eventType} - type: ${requestType}, table: ${tableId}`);
+            // #region agent log
+            fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:448',message:'Requests subscription callback fired',data:{eventType:payload.eventType,hasNew:!!payload.new,hasOld:!!payload.old,requestType:payload.new?.request_type||payload.old?.request_type},timestamp:Date.now(),runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+            // #endregion
+            
+            // Check if this is an animator request
+            const isAnimatorRequest = requestType === 'animator';
+            
+            if (payload.eventType === 'INSERT') {
+              const eventStartTime = performance.now();
+              const realRequestId = payload.new?.id;
+              const insertTableId = payload.new?.table_id || 'unknown';
+              const status = payload.new?.status || 'unknown';
+              const insertTimestamp = payload.new?.timestamp;
+              
+              // Check if we already have this order (from optimistic update)
+              const existingTable = tablesRef.current[insertTableId];
+              const hasOptimisticOrder = existingTable?.requests.some(
+                req => req.id.startsWith('temp_') && 
+                       req.timestamp === insertTimestamp &&
+                       req.requestType === requestType
+              );
+              
+              if (hasOptimisticOrder) {
+                // Replace optimistic order with real one from database
+                console.log(`🔄 Replacing optimistic order with real database order - Temp → Real ID: ${realRequestId}`);
+                setTables(prev => {
+                  const updated = { ...prev };
+                  if (updated[insertTableId]) {
+                    updated[insertTableId] = {
+                      ...updated[insertTableId],
+                      requests: updated[insertTableId].requests.map(req => {
+                        if (req.id.startsWith('temp_') && req.timestamp === insertTimestamp && req.requestType === requestType) {
+                          return {
+                            ...req,
+                            id: realRequestId,
+                            details: payload.new?.details || req.details,
+                            total: parseFloat(payload.new?.total || String(req.total)),
+                          };
+                        }
+                        return req;
+                      }),
+                    };
+                  }
+                  return updated;
+                });
+                
+                // Update refs
+                tablesRef.current = {
+                  ...tablesRef.current,
+                  [insertTableId]: {
+                    ...tablesRef.current[insertTableId],
+                    requests: tablesRef.current[insertTableId].requests.map(req => {
+                      if (req.id.startsWith('temp_') && req.timestamp === insertTimestamp && req.requestType === requestType) {
+                        return {
+                          ...req,
+                          id: realRequestId,
+                          details: payload.new?.details || req.details,
+                          total: parseFloat(payload.new?.total || String(req.total)),
+                        };
+                      }
+                      return req;
+                    }),
+                  },
+                };
+                
+                console.log(`✅ Optimistic order replaced with real database order`);
+                // Don't trigger feedback again - already triggered by optimistic update
+              } else {
+                // New order from another client/device - add it and trigger feedback
+                console.log(`✅ New request received from another source (${requestType}) - reloading data...`);
+                
+                // INSTANT (0ms) feedback - trigger callback immediately for new pending orders
+                // Only trigger for pending orders (not confirmed/completed)
+                if (onNewOrderCallbackRef.current && status === 'pending') {
+                  const callbackStart = performance.now();
+                  try {
+                    onNewOrderCallbackRef.current(requestType || 'unknown', insertTableId);
+                    const callbackDuration = performance.now() - callbackStart;
+                    console.log(`⚡ INSTANT (${callbackDuration.toFixed(3)}ms) feedback triggered! requestType: ${requestType}, table: ${insertTableId}, status: ${status}`);
+                    addSubscriptionLog('requests', 'EVENT', `INSTANT FEEDBACK - ${requestType} (${callbackDuration.toFixed(3)}ms)`);
+                  } catch (error) {
+                    console.error('Error in instant feedback callback:', error);
+                  }
+                } else if (status !== 'pending') {
+                  console.log(`⏭️ Skipping instant feedback - status is ${status} (not pending)`);
+                }
+                
+                // Immediate reload for new requests from other sources
+                reloadData(`requests subscription - INSERT ${requestType}`);
+              }
+              
+              const totalTime = performance.now() - eventStartTime;
+              console.log(`⏱️ Total INSERT handling time: ${totalTime.toFixed(2)}ms`);
+            } else if (payload.eventType === 'UPDATE') {
+              console.log(`✅ Request updated (${requestType}) - reloading data...`);
+              // Immediate reload for all request updates (orders, bills, animator, etc.)
+              reloadData(`requests subscription - UPDATE ${requestType}`);
+            } else if (payload.eventType === 'DELETE') {
+              console.log(`✅ Request deleted (${requestType}) - reloading data...`);
+              // Immediate reload when requests are deleted (table paid/reset, etc.)
+              reloadData(`requests subscription - DELETE ${requestType}`);
+            }
+          }
+        );
+    };
+
+    const requestsSubscription = setupRequestsSubscription();
+    const requestsSubscribeStart = performance.now();
+    requestsSubscription.subscribe((status) => {
+      const subscribeTime = performance.now() - requestsSubscribeStart;
+      console.log(`📡 Requests subscription status: ${status} (took ${subscribeTime.toFixed(2)}ms to subscribe)`);
+      subscriptionStatuses.requests = status as any;
+      addSubscriptionLog('requests', status === 'SUBSCRIBED' ? 'SUBSCRIBED' : 'ERROR', `Status: ${status} (${subscribeTime.toFixed(2)}ms)`);
+      // #region agent log
+      fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:495',message:'Requests subscription status changed',data:{status},timestamp:Date.now(),runId:'run1',hypothesisId:'I'})}).catch(()=>{});
+      // #endregion
+      
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        addSubscriptionLog('requests', 'ERROR', `Connection failed: ${status}`);
+        handleSubscriptionError('requests', requestsSubscription, setupRequestsSubscription);
+      }
+    });
 
     // OPTIMIZATION: Selective real-time updates - only update changed items
     // This avoids full reloads and improves performance significantly
-    const menuSubscription = supabase
-      .channel('menu_changes')
-      .on('postgres_changes',
-        { 
-          event: '*', // Listen to INSERT, UPDATE, DELETE
-          schema: 'public', 
-          table: 'menu_items' 
-        },
-        (payload) => {
-          console.log('Real-time menu_items change:', payload.eventType, payload);
-          
-          if (payload.eventType === 'INSERT' && payload.new) {
-            // Add new item without reloading all items
-            const newItem = mapMenuItem(payload.new);
-            setMenuItems(prev => {
-              // Check if item already exists (avoid duplicates)
-              if (prev.find(item => item.id === newItem.id)) {
-                return prev;
-              }
-              return [...prev, newItem].sort((a, b) => {
-                const catA = a.cat || '';
-                const catB = b.cat || '';
-                return catA.localeCompare(catB);
+    const setupMenuSubscription = () => {
+      const setupTime = performance.now();
+      addSubscriptionLog('menu', 'SUBSCRIBED', 'Setting up menu subscription');
+      return supabase
+        .channel('menu_changes')
+        .on('postgres_changes',
+          { 
+            event: '*', // Listen to INSERT, UPDATE, DELETE
+            schema: 'public', 
+            table: 'menu_items' 
+          },
+          (payload) => {
+            const eventTime = performance.now();
+            const timeSinceSetup = (eventTime - setupTime).toFixed(2);
+            console.log(`🍽️ Real-time menu_items change (${timeSinceSetup}ms after setup):`, payload.eventType, payload);
+            addSubscriptionLog('menu', 'EVENT', `${payload.eventType} - item_id: ${payload.new?.id || payload.old?.id || 'unknown'}`);
+            
+            // Force re-render on menu changes
+            setRealtimeUpdateVersion(prev => prev + 1);
+            
+            if (payload.eventType === 'INSERT' && payload.new) {
+              // Add new item without reloading all items
+              const newItem = mapMenuItem(payload.new);
+              setMenuItems(prev => {
+                // Check if item already exists (avoid duplicates)
+                if (prev.find(item => item.id === newItem.id)) {
+                  return prev;
+                }
+                return [...prev, newItem].sort((a, b) => {
+                  const catA = a.cat || '';
+                  const catB = b.cat || '';
+                  return catA.localeCompare(catB);
+                });
               });
-            });
-            console.log(`✅ Added menu item in real-time: ${newItem.name}`);
-          } else if (payload.eventType === 'UPDATE' && payload.new) {
-            // Update existing item without reloading all items
-            const updatedItem = mapMenuItem(payload.new);
-            setMenuItems(prev => prev.map(item => 
-              item.id === updatedItem.id ? updatedItem : item
-            ));
-            console.log(`✅ Updated menu item in real-time: ${updatedItem.name}`);
-          } else if (payload.eventType === 'DELETE' && payload.old) {
-            // Remove deleted item without reloading all items
-            const deletedId = payload.old.id;
-            setMenuItems(prev => prev.filter(item => item.id !== deletedId));
-            console.log(`✅ Deleted menu item in real-time: ${deletedId}`);
+              console.log(`✅ Added menu item in real-time: ${newItem.name}`);
+            } else if (payload.eventType === 'UPDATE' && payload.new) {
+              // Update existing item without reloading all items
+              const updatedItem = mapMenuItem(payload.new);
+              setMenuItems(prev => prev.map(item => 
+                item.id === updatedItem.id ? updatedItem : item
+              ));
+              console.log(`✅ Updated menu item in real-time: ${updatedItem.name}`);
+            } else if (payload.eventType === 'DELETE' && payload.old) {
+              // Remove deleted item without reloading all items
+              const deletedId = payload.old.id;
+              setMenuItems(prev => prev.filter(item => item.id !== deletedId));
+              console.log(`✅ Deleted menu item in real-time: ${deletedId}`);
+            }
           }
-        }
-      )
-      .subscribe();
+        );
+    };
+
+    const menuSubscription = setupMenuSubscription();
+    const menuSubscribeStart = performance.now();
+    menuSubscription.subscribe((status) => {
+      const subscribeTime = performance.now() - menuSubscribeStart;
+      console.log(`📡 Menu subscription status: ${status} (took ${subscribeTime.toFixed(2)}ms to subscribe)`);
+      subscriptionStatuses.menu = status as any;
+      addSubscriptionLog('menu', status === 'SUBSCRIBED' ? 'SUBSCRIBED' : 'ERROR', `Status: ${status} (${subscribeTime.toFixed(2)}ms)`);
+      // #region agent log
+      fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:548',message:'Menu subscription status changed',data:{status},timestamp:Date.now(),runId:'run1',hypothesisId:'I'})}).catch(()=>{});
+      // #endregion
+      
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        addSubscriptionLog('menu', 'ERROR', `Connection failed: ${status}`);
+        handleSubscriptionError('menu', menuSubscription, setupMenuSubscription);
+      }
+    });
 
     // Real-time subscription for restaurant_tables changes
-    const tablesSubscription = supabase
-      .channel('tables_changes')
-      .on('postgres_changes',
-        { 
-          event: '*', // Listen to INSERT, UPDATE, DELETE
-          schema: 'public', 
-          table: 'restaurant_tables' 
-        },
-        () => {
-          // Immediate reload for instant table status updates
-          loadTableSessions();
-        }
-      )
-      .subscribe();
+    const setupTablesSubscription = () => {
+      return supabase
+        .channel('tables_changes')
+        .on('postgres_changes',
+          { 
+            event: '*', // Listen to INSERT, UPDATE, DELETE
+            schema: 'public', 
+            table: 'restaurant_tables' 
+          },
+          (payload) => {
+            console.log('🪑 Real-time restaurant_tables change:', payload.eventType, payload);
+            // Immediate reload for instant table status updates
+            reloadData();
+          }
+        );
+    };
+
+    const tablesSubscription = setupTablesSubscription();
+    tablesSubscription.subscribe((status) => {
+      console.log('📡 Tables subscription status:', status);
+      subscriptionStatuses.tables = status as any;
+      // #region agent log
+      fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:567',message:'Tables subscription status changed',data:{status},timestamp:Date.now(),runId:'run1',hypothesisId:'I'})}).catch(()=>{});
+      // #endregion
+      
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        handleSubscriptionError('tables', tablesSubscription, setupTablesSubscription);
+      }
+    });
 
     // Real-time subscription for daily_menu_assignments changes
     // Immediate reload for MenuEditor to see changes instantly
-    const dailyMenuSubscription = supabase
-      .channel('daily_menu_changes')
-      .on('postgres_changes',
-        { 
-          event: '*', // Listen to INSERT, UPDATE, DELETE
-          schema: 'public', 
-          table: 'daily_menu_assignments' 
-        },
-        () => {
-          // Immediate reload for MenuEditor to see daily menu changes instantly
-          loadTableSessions();
-        }
-      )
-      .subscribe();
+    const setupDailyMenuSubscription = () => {
+      return supabase
+        .channel('daily_menu_changes')
+        .on('postgres_changes',
+          { 
+            event: '*', // Listen to INSERT, UPDATE, DELETE
+            schema: 'public', 
+            table: 'daily_menu_assignments' 
+          },
+          (payload) => {
+            console.log('📅 Real-time daily_menu_assignments change:', payload.eventType, payload);
+            // Immediate reload for MenuEditor to see daily menu changes instantly
+            reloadData();
+          }
+        );
+    };
+
+    const dailyMenuSubscription = setupDailyMenuSubscription();
+    dailyMenuSubscription.subscribe((status) => {
+      console.log('📡 Daily menu subscription status:', status);
+      subscriptionStatuses.dailyMenu = status as any;
+      // #region agent log
+      fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:587',message:'Daily menu subscription status changed',data:{status},timestamp:Date.now(),runId:'run1',hypothesisId:'I'})}).catch(()=>{});
+      // #endregion
+      
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        handleSubscriptionError('dailyMenu', dailyMenuSubscription, setupDailyMenuSubscription);
+      }
+    });
 
     return () => {
+      console.log('🧹 Cleaning up real-time subscriptions');
       supabase.removeChannel(cartSubscription);
       supabase.removeChannel(requestsSubscription);
       supabase.removeChannel(menuSubscription);
       supabase.removeChannel(tablesSubscription);
       supabase.removeChannel(dailyMenuSubscription);
     };
-  }, [loadTableSessions]);
+  }, []); // Empty dependency array - subscriptions should only be created once
 
   const getTableSession = useCallback((tableId: string, isVip = false): TableSession => {
     if (tables[tableId]) {
@@ -762,8 +1322,86 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   }, [loadTableSessions]); // tables not needed - we use setTables which is stable
 
   const submitOrder = useCallback(async (tableId: string, source: 'nfc' | 'qr' | 'direct' = 'direct') => {
+    // Get current cart from state (not database) for instant access
+    const currentTable = tablesRef.current[tableId];
+    if (!currentTable || currentTable.cart.length === 0) {
+      console.log('⚠️ No items in cart to submit');
+      return;
+    }
+    
+    // Calculate order details from current cart state (INSTANT)
+    const orderDetails = currentTable.cart
+      .map(ci => `${ci.quantity}x ${ci.name}`)
+      .join(', ');
+    const orderTotal = currentTable.cart.reduce(
+      (sum, ci) => sum + (ci.price * ci.quantity),
+      0
+    );
+
+    // Generate temporary ID for optimistic update
+    const tempRequestId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const timestamp = Date.now();
+
+    // Create optimistic order request (INSTANT - 0ms)
+    const optimisticRequest: TableRequest = {
+      id: tempRequestId,
+      action: '🍽️ NEW ORDER',
+      details: orderDetails,
+      total: orderTotal,
+      status: 'pending',
+      timestamp: timestamp,
+      source: source,
+      requestType: 'order',
+    };
+
+    // OPTIMISTIC UPDATE: Add order to local state immediately (0ms)
+    setTables(prev => {
+      const updated = { ...prev };
+      if (updated[tableId]) {
+        updated[tableId] = {
+          ...updated[tableId],
+          cart: [], // Clear cart immediately
+          requests: [...updated[tableId].requests, optimisticRequest], // Add order instantly
+        };
+      }
+      return updated;
+    });
+
+    // Update refs immediately
+    tablesRef.current = {
+      ...tablesRef.current,
+      [tableId]: {
+        ...tablesRef.current[tableId],
+        cart: [],
+        requests: [...tablesRef.current[tableId].requests, optimisticRequest],
+      },
+    };
+
+    // Force re-render to show optimistic update
+    setRealtimeUpdateVersion(prev => prev + 1);
+
+    // Trigger instant feedback (0ms) for StaffDashboard (same tab)
+    if (onNewOrderCallbackRef.current) {
+      try {
+        onNewOrderCallbackRef.current('order', tableId);
+        console.log(`⚡ Instant feedback triggered for optimistic order`);
+      } catch (error) {
+        console.error('Error in instant feedback callback:', error);
+      }
+    }
+
+    // BROADCAST to all other tabs/windows (0ms, no database)
+    // This instantly updates StaffDashboard in other browser windows
+    broadcastUpdate('NEW_REQUEST', {
+      tableId,
+      request: optimisticRequest,
+    });
+
+    console.log(`⚡ Optimistic order added instantly (0ms) - Temp ID: ${tempRequestId}, Table: ${tableId}`);
+
+    // Now sync with database in background (async, non-blocking)
     try {
-      // Get current cart
+      // Get cart items from database for accurate sync
       const { data: cartItems, error: cartError } = await supabase
         .from('cart_items')
         .select(`
@@ -773,15 +1411,85 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         .eq('table_id', tableId);
 
       if (cartError) throw cartError;
-      if (!cartItems || cartItems.length === 0) return;
       
-      const orderDetails = cartItems
+      // If cart is empty, it might have been cleared already
+      if (!cartItems || cartItems.length === 0) {
+        // Cart already cleared - just create the request
+        const realRequestId = `req_${Date.now()}`;
+        const { error: insertError } = await supabase
+          .from('table_requests')
+          .insert({
+            id: realRequestId,
+            table_id: tableId,
+            action: '🍽️ NEW ORDER',
+            details: orderDetails,
+            total: orderTotal,
+            status: 'pending',
+            timestamp: timestamp,
+            source: source,
+            request_type: 'order',
+          });
+
+        if (insertError) {
+          // ROLLBACK: Remove optimistic update on error
+          console.error('❌ Database insert failed - rolling back optimistic update');
+          setTables(prev => {
+            const updated = { ...prev };
+            if (updated[tableId]) {
+              updated[tableId] = {
+                ...updated[tableId],
+                requests: updated[tableId].requests.filter(req => req.id !== tempRequestId),
+                cart: currentTable.cart, // Restore cart
+              };
+            }
+            return updated;
+          });
+          tablesRef.current = {
+            ...tablesRef.current,
+            [tableId]: currentTable, // Restore ref
+          };
+          throw insertError;
+        }
+
+        // Replace temp ID with real ID
+        setTables(prev => {
+          const updated = { ...prev };
+          if (updated[tableId]) {
+            updated[tableId] = {
+              ...updated[tableId],
+              requests: updated[tableId].requests.map(req =>
+                req.id === tempRequestId
+                  ? { ...req, id: realRequestId }
+                  : req
+              ),
+            };
+          }
+          return updated;
+        });
+        
+        // Update refs
+        tablesRef.current = {
+          ...tablesRef.current,
+          [tableId]: {
+            ...tablesRef.current[tableId],
+            requests: tablesRef.current[tableId].requests.map(req =>
+              req.id === tempRequestId ? { ...req, id: realRequestId } : req
+            ),
+          },
+        };
+        
+        console.log(`✅ Order synced with database - Real ID: ${realRequestId}`);
+        return;
+      }
+      
+      // Recalculate from database (more accurate)
+      const dbOrderDetails = cartItems
         .map(ci => {
           const menuItem = ci.menu_items as DatabaseMenuItem | null;
           return `${ci.quantity}x ${menuItem?.name || 'Unknown'}`;
         })
         .join(', ');
-      const orderTotal = cartItems.reduce(
+      const dbOrderTotal = cartItems.reduce(
         (sum, ci) => {
           const menuItem = ci.menu_items as DatabaseMenuItem | null;
           return sum + (parseFloat(String(menuItem?.price || '0')) * ci.quantity);
@@ -789,102 +1497,463 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         0
       );
 
-      // Create order request
-      const requestId = `req_${Date.now()}`;
-      await supabase
+      // Create real order request in database
+      const realRequestId = `req_${Date.now()}`;
+      const { error: insertError } = await supabase
         .from('table_requests')
         .insert({
-          id: requestId,
+          id: realRequestId,
           table_id: tableId,
-        action: '🍽️ NEW ORDER',
-        details: orderDetails,
-        total: orderTotal,
-        status: 'pending',
-        timestamp: Date.now(),
+          action: '🍽️ NEW ORDER',
+          details: dbOrderDetails,
+          total: dbOrderTotal,
+          status: 'pending',
+          timestamp: timestamp,
           source: source,
           request_type: 'order',
         });
-      
-      // Clear cart immediately after order submission
-      // This resets the menu to clean state, but bill requests remain visible
-      await supabase
-        .from('cart_items')
-        .delete()
-        .eq('table_id', tableId);
 
-      // Optimistic update: clear cart in UI immediately
+      if (insertError) {
+        // ROLLBACK: Remove optimistic update on error
+        console.error('❌ Database insert failed - rolling back optimistic update');
+        setTables(prev => {
+          const updated = { ...prev };
+          if (updated[tableId]) {
+            updated[tableId] = {
+              ...updated[tableId],
+              requests: updated[tableId].requests.filter(req => req.id !== tempRequestId),
+              cart: currentTable.cart, // Restore cart
+            };
+          }
+          return updated;
+        });
+        tablesRef.current = {
+          ...tablesRef.current,
+          [tableId]: currentTable, // Restore ref
+        };
+        throw insertError;
+      }
+
+      // Replace temp ID with real ID from database
       setTables(prev => {
         const updated = { ...prev };
         if (updated[tableId]) {
           updated[tableId] = {
             ...updated[tableId],
-            cart: [], // Clear cart immediately
+            requests: updated[tableId].requests.map(req =>
+              req.id === tempRequestId
+                ? { ...req, id: realRequestId, details: dbOrderDetails, total: dbOrderTotal }
+                : req
+            ),
           };
         }
         return updated;
       });
+      
+      // Update refs
+      tablesRef.current = {
+        ...tablesRef.current,
+        [tableId]: {
+          ...tablesRef.current[tableId],
+          requests: tablesRef.current[tableId].requests.map(req =>
+            req.id === tempRequestId
+              ? { ...req, id: realRequestId, details: dbOrderDetails, total: dbOrderTotal }
+              : req
+          ),
+        },
+      };
+      
+      // Clear cart in database
+      await supabase
+        .from('cart_items')
+        .delete()
+        .eq('table_id', tableId);
+
+      console.log(`✅ Order synced with database - Real ID: ${realRequestId}`);
+      
+      // Real-time subscription will handle final sync, but we already have it locally
+      // No need to call loadTableSessions() - optimistic update already shown it
+      
     } catch (error) {
-      console.error('Error submitting order:', error);
+      console.error('Error syncing order with database:', error);
+      
+      // ROLLBACK: Remove optimistic update on error
+      setTables(prev => {
+        const updated = { ...prev };
+        if (updated[tableId]) {
+          updated[tableId] = {
+            ...updated[tableId],
+            requests: updated[tableId].requests.filter(req => req.id !== tempRequestId),
+            cart: currentTable.cart, // Restore cart
+          };
+        }
+        return updated;
+      });
+      
+      // Restore refs
+      tablesRef.current = {
+        ...tablesRef.current,
+        [tableId]: currentTable,
+      };
+      
+      // Re-throw error so UI can show error message
       throw error;
     }
-  }, []); // No dependencies - we fetch from database and use setTables (stable)
+  }, [loadTableSessions]);
 
   const callWaiter = useCallback(async (tableId: string, source: 'nfc' | 'qr' | 'direct' = 'direct') => {
+    // Generate temporary ID for optimistic update
+    const tempRequestId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const timestamp = Date.now();
+
+    // Create optimistic waiter request (INSTANT - 0ms)
+    const optimisticRequest: TableRequest = {
+      id: tempRequestId,
+      action: '🔔 WAITER CALL',
+      details: 'Customer requested assistance',
+      total: 0,
+      status: 'pending',
+      timestamp: timestamp,
+      source: source,
+      requestType: 'waiter',
+    };
+
+    // OPTIMISTIC UPDATE: Add waiter request to local state immediately (0ms)
+    setTables(prev => {
+      const updated = { ...prev };
+      if (!updated[tableId]) {
+        updated[tableId] = {
+          tableId,
+          isLocked: false,
+          cart: [],
+          requests: [],
+          isVip: false,
+        };
+      }
+      updated[tableId] = {
+        ...updated[tableId],
+        requests: [...updated[tableId].requests, optimisticRequest],
+      };
+      return updated;
+    });
+
+    // Update refs immediately
+    tablesRef.current = {
+      ...tablesRef.current,
+      [tableId]: {
+        ...tablesRef.current[tableId] || {
+          tableId,
+          isLocked: false,
+          cart: [],
+          requests: [],
+          isVip: false,
+        },
+        requests: [...(tablesRef.current[tableId]?.requests || []), optimisticRequest],
+      },
+    };
+
+    // Force re-render to show optimistic update instantly
+    setRealtimeUpdateVersion(prev => prev + 1);
+
+    // Trigger instant feedback (0ms) for StaffDashboard (same tab)
+    if (onNewOrderCallbackRef.current) {
+      try {
+        onNewOrderCallbackRef.current('waiter', tableId);
+        console.log(`⚡ Instant feedback triggered for optimistic waiter call`);
+      } catch (error) {
+        console.error('Error in instant feedback callback:', error);
+      }
+    }
+
+    // BROADCAST to all other tabs/windows (0ms, no database)
+    broadcastUpdate('NEW_REQUEST', {
+      tableId,
+      request: optimisticRequest,
+    });
+
+    console.log(`⚡ Optimistic waiter call added instantly (0ms) - Temp ID: ${tempRequestId}, Table: ${tableId}`);
+
     try {
-      await supabase
+      // Create real waiter request in database
+      const realRequestId = `req_${Date.now()}`;
+      const { error: insertError } = await supabase
         .from('table_requests')
         .insert({
-        id: `req_${Date.now()}`,
+          id: realRequestId,
           table_id: tableId,
-        action: '🔔 WAITER CALL',
-        details: 'Customer requested assistance',
-        total: 0,
-        status: 'pending',
-        timestamp: Date.now(),
+          action: '🔔 WAITER CALL',
+          details: 'Customer requested assistance',
+          total: 0,
+          status: 'pending',
+          timestamp: timestamp,
           source: source,
           request_type: 'waiter',
         });
+
+      if (insertError) {
+        // ROLLBACK: Remove optimistic update on error
+        console.error('❌ Database insert failed - rolling back optimistic update');
+        setTables(prev => {
+          const updated = { ...prev };
+          if (updated[tableId]) {
+            updated[tableId] = {
+              ...updated[tableId],
+              requests: updated[tableId].requests.filter(req => req.id !== tempRequestId),
+            };
+          }
+          return updated;
+        });
+        
+        // Restore refs
+        tablesRef.current = {
+          ...tablesRef.current,
+          [tableId]: {
+            ...tablesRef.current[tableId],
+            requests: tablesRef.current[tableId].requests.filter(req => req.id !== tempRequestId),
+          },
+        };
+        
+        throw insertError;
+      }
+
+      // Replace temp ID with real ID from database
+      setTables(prev => {
+        const updated = { ...prev };
+        if (updated[tableId]) {
+          updated[tableId] = {
+            ...updated[tableId],
+            requests: updated[tableId].requests.map(req =>
+              req.id === tempRequestId ? { ...req, id: realRequestId } : req
+            ),
+          };
+        }
+        return updated;
+      });
+      
+      // Update refs
+      tablesRef.current = {
+        ...tablesRef.current,
+        [tableId]: {
+          ...tablesRef.current[tableId],
+          requests: tablesRef.current[tableId].requests.map(req =>
+            req.id === tempRequestId ? { ...req, id: realRequestId } : req
+          ),
+        },
+      };
+
+      console.log(`✅ Waiter call synced with database - Real ID: ${realRequestId}`);
     } catch (error) {
-      console.error('Error calling waiter:', error);
+      console.error('Error syncing waiter call with database:', error);
+      throw error;
     }
-  }, []);
+  }, [loadTableSessions]);
 
   const requestBill = useCallback(async (tableId: string, paymentMethod: 'cash' | 'card', source: 'nfc' | 'qr' | 'direct' = 'direct') => {
+    // Get current table state for calculating total
+    const currentTable = tablesRef.current[tableId];
+    if (!currentTable) return;
+    
+    // Calculate total from current state (INSTANT)
+    const totalBill = currentTable.requests
+      .filter(r => r.status === 'confirmed' || r.status === 'completed')
+      .reduce((sum, r) => sum + r.total, 0);
+
+    // Generate temporary ID for optimistic update
+    const tempRequestId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const timestamp = Date.now();
+
+    // Create optimistic bill request (INSTANT - 0ms)
+    const optimisticRequest: TableRequest = {
+      id: tempRequestId,
+      action: '💳 BILL REQUEST',
+      details: `Payment: ${paymentMethod === 'cash' ? 'Cash' : 'Card'}`,
+      total: totalBill,
+      status: 'pending',
+      timestamp: timestamp,
+      paymentMethod: paymentMethod,
+      source: source,
+      requestType: 'bill',
+    };
+
+    // OPTIMISTIC UPDATE: Add bill request to local state immediately (0ms)
+    setTables(prev => {
+      const updated = { ...prev };
+      if (!updated[tableId]) {
+        updated[tableId] = {
+          tableId,
+          isLocked: false,
+          cart: [],
+          requests: [],
+          isVip: false,
+        };
+      }
+      updated[tableId] = {
+        ...updated[tableId],
+        requests: [...updated[tableId].requests, optimisticRequest],
+      };
+      return updated;
+    });
+
+    // Update refs immediately
+    tablesRef.current = {
+      ...tablesRef.current,
+      [tableId]: {
+        ...tablesRef.current[tableId] || {
+          tableId,
+          isLocked: false,
+          cart: [],
+          requests: [],
+          isVip: false,
+        },
+        requests: [...(tablesRef.current[tableId]?.requests || []), optimisticRequest],
+      },
+    };
+
+    // Force re-render to show optimistic update instantly
+    setRealtimeUpdateVersion(prev => prev + 1);
+
+    // Trigger instant feedback (0ms) for StaffDashboard (same tab)
+    if (onNewOrderCallbackRef.current) {
+      try {
+        onNewOrderCallbackRef.current('bill', tableId);
+        console.log(`⚡ Instant feedback triggered for optimistic bill request`);
+      } catch (error) {
+        console.error('Error in instant feedback callback:', error);
+      }
+    }
+
+    // BROADCAST to all other tabs/windows (0ms, no database)
+    broadcastUpdate('NEW_REQUEST', {
+      tableId,
+      request: optimisticRequest,
+    });
+
+    console.log(`⚡ Optimistic bill request added instantly (0ms) - Temp ID: ${tempRequestId}, Table: ${tableId}, Total: ${totalBill}`);
+
     try {
-      // Get total from all completed orders
-      const { data: requests } = await supabase
+      // Get total from database for accurate sync
+      const { data: requests, error: fetchError } = await supabase
         .from('table_requests')
         .select('total')
         .eq('table_id', tableId)
         .eq('status', 'completed');
       
-      const totalBill = (requests || []).reduce((sum, r) => sum + parseFloat(r.total || '0'), 0);
+      if (fetchError) {
+        // ROLLBACK: Remove optimistic update on error
+        console.error('❌ Error fetching requests - rolling back optimistic update');
+        setTables(prev => {
+          const updated = { ...prev };
+          if (updated[tableId]) {
+            updated[tableId] = {
+              ...updated[tableId],
+              requests: updated[tableId].requests.filter(req => req.id !== tempRequestId),
+            };
+          }
+          return updated;
+        });
+        
+        // Restore refs
+        tablesRef.current = {
+          ...tablesRef.current,
+          [tableId]: {
+            ...tablesRef.current[tableId],
+            requests: tablesRef.current[tableId].requests.filter(req => req.id !== tempRequestId),
+          },
+        };
+        
+        throw fetchError;
+      }
       
-      // Create bill request
-      await supabase
+      const dbTotalBill = (requests || []).reduce((sum, r) => sum + parseFloat(r.total || '0'), 0);
+      
+      // Create real bill request in database
+      const realRequestId = `req_${Date.now()}`;
+      const { error: insertError } = await supabase
         .from('table_requests')
         .insert({
-        id: `req_${Date.now()}`,
+          id: realRequestId,
           table_id: tableId,
-        action: '💳 BILL REQUEST',
-        details: `Payment: ${paymentMethod === 'cash' ? 'Cash' : 'Card'}`,
-        total: totalBill,
-        status: 'pending',
-        timestamp: Date.now(),
+          action: '💳 BILL REQUEST',
+          details: `Payment: ${paymentMethod === 'cash' ? 'Cash' : 'Card'}`,
+          total: dbTotalBill,
+          status: 'pending',
+          timestamp: timestamp,
           payment_method: paymentMethod,
           source: source,
           request_type: 'bill',
         });
 
-      // Don't lock table when requesting bill - allow customer to see menu
-      // Table will be locked/reset when bill is marked as paid by staff
+      if (insertError) {
+        // ROLLBACK: Remove optimistic update on error
+        console.error('❌ Database insert failed - rolling back optimistic update');
+        setTables(prev => {
+          const updated = { ...prev };
+          if (updated[tableId]) {
+            updated[tableId] = {
+              ...updated[tableId],
+              requests: updated[tableId].requests.filter(req => req.id !== tempRequestId),
+            };
+          }
+          return updated;
+        });
+        
+        // Restore refs
+        tablesRef.current = {
+          ...tablesRef.current,
+          [tableId]: {
+            ...tablesRef.current[tableId],
+            requests: tablesRef.current[tableId].requests.filter(req => req.id !== tempRequestId),
+          },
+        };
+        
+        throw insertError;
+      }
+
+      // Replace temp ID with real ID from database
+      setTables(prev => {
+        const updated = { ...prev };
+        if (updated[tableId]) {
+          updated[tableId] = {
+            ...updated[tableId],
+            requests: updated[tableId].requests.map(req =>
+              req.id === tempRequestId
+                ? { ...req, id: realRequestId, total: dbTotalBill }
+                : req
+            ),
+          };
+        }
+        return updated;
+      });
+      
+      // Update refs
+      tablesRef.current = {
+        ...tablesRef.current,
+        [tableId]: {
+          ...tablesRef.current[tableId],
+          requests: tablesRef.current[tableId].requests.map(req =>
+            req.id === tempRequestId
+              ? { ...req, id: realRequestId, total: dbTotalBill }
+              : req
+          ),
+        },
+      };
+
+      console.log(`✅ Bill request synced with database - Real ID: ${realRequestId}, Total: ${dbTotalBill}`);
     } catch (error) {
-      console.error('Error requesting bill:', error);
+      console.error('Error syncing bill request with database:', error);
+      throw error;
     }
-  }, []);
+  }, [loadTableSessions]);
 
   const completeRequest = useCallback(async (tableId: string, requestId: string) => {
-    // Optimistic update: update request status to 'confirmed' in local state
+    // Get current state for rollback
+    const currentTable = tablesRef.current[tableId];
+    if (!currentTable) return;
+    
+    const currentRequest = currentTable.requests.find(r => r.id === requestId);
+    if (!currentRequest) return;
+    
+    // OPTIMISTIC UPDATE: Update request status to 'confirmed' instantly (0ms)
     setTables(prev => {
       const updated = { ...prev };
       if (!updated[tableId]) return updated;
@@ -899,6 +1968,29 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       return updated;
     });
 
+    // Update refs immediately
+    tablesRef.current = {
+      ...tablesRef.current,
+      [tableId]: {
+        ...tablesRef.current[tableId],
+        requests: tablesRef.current[tableId].requests.map(req =>
+          req.id === requestId ? { ...req, status: 'confirmed' as const } : req
+        ),
+      },
+    };
+
+    // Force re-render to show optimistic update instantly
+    setRealtimeUpdateVersion(prev => prev + 1);
+
+    // BROADCAST to all other tabs/windows (0ms, no database)
+    broadcastUpdate('REQUEST_UPDATED', {
+      tableId,
+      requestId,
+      updates: { status: 'confirmed' },
+    });
+
+    console.log(`⚡ Optimistic update: Request ${requestId} marked as confirmed instantly (0ms)`);
+
     try {
       // Update request status to 'confirmed' in database (DO NOT DELETE)
       // The request stays in table_requests until the table is marked as paid
@@ -909,17 +2001,34 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         .eq('table_id', tableId);
       
       if (updateError) {
-        console.error('Error confirming request:', updateError);
-        // Rollback optimistic update on error
-        loadTableSessions();
+        console.error('❌ Database update failed - rolling back optimistic update');
+        // ROLLBACK: Restore original status
+        setTables(prev => {
+          const updated = { ...prev };
+          if (updated[tableId]) {
+            updated[tableId] = {
+              ...updated[tableId],
+              requests: updated[tableId].requests.map(req =>
+                req.id === requestId ? currentRequest : req
+              ),
+            };
+          }
+          return updated;
+        });
+        
+        // Restore refs
+        tablesRef.current = {
+          ...tablesRef.current,
+          [tableId]: currentTable,
+        };
+        
         throw updateError;
       }
 
-      console.log(`✅ Confirmed request ${requestId} - status updated to 'confirmed' (stays in table_requests until paid)`);
+      console.log(`✅ Request ${requestId} confirmed in database - sync complete`);
     } catch (error) {
       console.error('Error confirming request:', error);
-      // Rollback optimistic update on error
-      loadTableSessions();
+      // Error already handled in try block
       throw error;
     }
   }, [loadTableSessions]);
@@ -997,179 +2106,184 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const markAsPaid = useCallback(async (tableId: string) => {
     // Get current table data before clearing for archive
     const currentTable = tables[tableId];
+    if (!currentTable) return;
     
-    // Complete child session if there's an active animator request
-    const animatorRequest = currentTable?.requests.find(req => req.requestType === 'animator' && req.status === 'confirmed');
+    // Store original state for potential rollback
+    const originalRequests = [...currentTable.requests];
+    const originalIsLocked = currentTable.isLocked;
+    const originalCart = [...currentTable.cart];
+
+    // INSTANT (0ms): Complete child session calculation locally if needed
+    const animatorRequest = currentTable.requests.find(req => req.requestType === 'animator' && req.status === 'confirmed');
+    let kidsZoneCharge = 0;
     if (animatorRequest && (animatorRequest.childLocation === 'kids_zone' || animatorRequest.childLocation === 'returning_to_table')) {
-      try {
-        await completeChildSession(tableId, animatorRequest.id);
-        console.log(`✅ Completed child session for ${tableId} before payment`);
-      } catch (error) {
-        console.error('Error completing child session before payment:', error);
-        // Continue with payment even if child session completion fails
-      }
+      // Calculate kids zone charge locally (0ms)
+      const totalElapsed = animatorRequest.totalTimeElapsed || 0;
+      const hourlyRate = animatorRequest.hourlyRate || 10;
+      kidsZoneCharge = (totalElapsed / 3600) * hourlyRate;
+      console.log(`⚡ Kids zone charge calculated instantly: ${kidsZoneCharge.toFixed(2)} EUR`);
     }
     
-    // Optimistic update: clear paid orders immediately
+    // INSTANT (0ms): OPTIMISTIC UPDATE - Clear table immediately
     setTables(prev => {
       const updated = { ...prev };
       if (!updated[tableId]) return updated;
       
-      // Remove all requests (they're being paid, so remove from view)
       updated[tableId] = {
         ...updated[tableId],
         isLocked: false,
-        requests: [], // Clear all orders when paid
+        requests: [],
+        cart: [],
       };
       
       return updated;
     });
 
-    try {
-      // Get all requests from database to move to completed_orders
-      const { data: requestsData, error: fetchError } = await supabase
-        .from('table_requests')
-        .select('*')
-        .eq('table_id', tableId);
+    // Update refs immediately (0ms)
+    tablesRef.current = {
+      ...tablesRef.current,
+      [tableId]: {
+        ...tablesRef.current[tableId],
+        isLocked: false,
+        requests: [],
+        cart: [],
+      },
+    };
 
-      if (fetchError) {
-        console.error('Error fetching requests:', fetchError);
-        loadTableSessions();
-        throw fetchError;
-      }
+    // Force re-render (0ms)
+    setRealtimeUpdateVersion(prev => prev + 1);
 
-      // Move all requests to completed_orders table immediately
-      if (requestsData && requestsData.length > 0) {
-        const completedOrders = requestsData.map(req => ({
-          id: req.id,
-          table_id: req.table_id,
-          action: req.action,
-          details: req.details || '',
-          total: parseFloat(req.total || '0'),
-          status: 'completed',
-          timestamp: req.timestamp,
-          payment_method: req.payment_method || null,
-        }));
+    // INSTANT (0ms): BROADCAST to all other tabs/windows
+    broadcastUpdate('TABLE_CLEARED', { tableId });
 
-        const { error: insertError } = await supabase
-          .from('completed_orders')
-          .insert(completedOrders);
+    // Mark as paid to prevent real-time from showing old data
+    setPaidTables(prev => new Set(prev).add(tableId));
 
-        if (insertError) {
-          console.error('Error moving to completed_orders:', insertError);
-          // Continue even if insert fails, but log it
-        } else {
-          console.log(`Moved ${completedOrders.length} orders to completed_orders for ${tableId}`);
+    console.log(`⚡ INSTANT (0ms): Table ${tableId} marked as paid - ${originalRequests.length} requests cleared`);
+
+    // BACKGROUND: Database sync (non-blocking, fire-and-forget)
+    // UI is already updated, database operations happen in background
+    (async () => {
+      try {
+        // Complete child session in database if needed
+        if (animatorRequest && (animatorRequest.childLocation === 'kids_zone' || animatorRequest.childLocation === 'returning_to_table')) {
+          try {
+            await completeChildSession(tableId, animatorRequest.id);
+            console.log(`✅ [Background] Child session completed for ${tableId}`);
+          } catch (error) {
+            console.error('[Background] Error completing child session:', error);
+          }
         }
-      }
 
-      // Archive the paid session for historical records
-      if (currentTable && currentTable.requests.length > 0) {
-        const totalRevenue = currentTable.requests.reduce((sum, r) => sum + r.total, 0);
-        const sessionStartTime = currentTable.requests.length > 0 
-          ? Math.min(...currentTable.requests.map(r => r.timestamp))
-          : Date.now();
-        const sessionDuration = Math.floor((Date.now() - sessionStartTime) / 60000);
+        // Fetch requests from database
+        const { data: requestsData } = await supabase
+          .from('table_requests')
+          .select('*')
+          .eq('table_id', tableId);
 
-        // Archive the paid session
-        const { error: archiveError } = await supabase
-          .from('table_history_archive')
-          .insert({
-            id: `archive_${tableId}_${Date.now()}`,
-            table_id: tableId,
-            cart_items: [],
-            requests: requestsData || [],
-            total_revenue: totalRevenue,
-            session_duration_minutes: sessionDuration,
+        // Move to completed_orders (parallel operations)
+        const dbOperations = [];
+
+        if (requestsData && requestsData.length > 0) {
+          const completedOrders = requestsData.map(req => ({
+            id: req.id,
+            table_id: req.table_id,
+            action: req.action,
+            details: req.details || '',
+            total: parseFloat(req.total || '0'),
+            status: 'completed',
+            timestamp: req.timestamp,
+            payment_method: req.payment_method || null,
+          }));
+
+          dbOperations.push(
+            supabase.from('completed_orders').insert(completedOrders)
+              .then(() => console.log(`✅ [Background] Moved ${completedOrders.length} orders to completed_orders`))
+              .catch(e => console.error('[Background] Error moving to completed_orders:', e))
+          );
+        }
+
+        // Archive session
+        if (originalRequests.length > 0) {
+          const totalRevenue = originalRequests.reduce((sum, r) => sum + r.total, 0);
+          const sessionStartTime = Math.min(...originalRequests.map(r => r.timestamp));
+          const sessionDuration = Math.floor((Date.now() - sessionStartTime) / 60000);
+
+          dbOperations.push(
+            supabase.from('table_history_archive').insert({
+              id: `archive_${tableId}_${Date.now()}`,
+              table_id: tableId,
+              cart_items: originalCart,
+              requests: requestsData || originalRequests,
+              total_revenue: totalRevenue,
+              session_duration_minutes: sessionDuration,
+            })
+              .then(() => console.log(`✅ [Background] Session archived for ${tableId}`))
+              .catch(e => console.error('[Background] Error archiving session:', e))
+          );
+        }
+
+        // Delete requests
+        dbOperations.push(
+          supabase.from('table_requests').delete().eq('table_id', tableId)
+            .then(() => console.log(`✅ [Background] Requests deleted for ${tableId}`))
+            .catch(e => console.error('[Background] Error deleting requests:', e))
+        );
+
+        // Clear cart
+        dbOperations.push(
+          supabase.from('cart_items').delete().eq('table_id', tableId)
+            .then(() => console.log(`✅ [Background] Cart cleared for ${tableId}`))
+            .catch(e => console.error('[Background] Error clearing cart:', e))
+        );
+
+        // Unlock table
+        dbOperations.push(
+          supabase.from('restaurant_tables').update({ 
+            is_locked: false,
+            session_started_at: new Date().toISOString()
+          }).eq('table_id', tableId)
+            .then(() => console.log(`✅ [Background] Table ${tableId} unlocked`))
+            .catch(e => console.error('[Background] Error unlocking table:', e))
+        );
+
+        // Run all database operations in parallel
+        await Promise.allSettled(dbOperations);
+
+        // Clear paid flag after delay
+        setTimeout(() => {
+          setPaidTables(prev => {
+            const next = new Set(prev);
+            next.delete(tableId);
+            return next;
           });
+        }, 2000);
 
-        if (archiveError) {
-          console.error('Error archiving paid session:', archiveError);
-          // Continue even if archive fails
-        }
+        console.log(`✅ [Background] All database operations completed for ${tableId}`);
+      } catch (error) {
+        console.error(`[Background] Error in database sync for ${tableId}:`, error);
+        // Note: We don't rollback here because the UI should stay cleared
+        // The database will eventually sync on next page load
       }
+    })();
 
-      // Delete ALL requests from table_requests immediately (remove from active view)
-      const { data: deletedRequests, error: deleteError } = await supabase
-        .from('table_requests')
-        .delete()
-        .eq('table_id', tableId)
-        .select();
-      
-      if (deleteError) {
-        console.error('Error deleting requests:', deleteError);
-        // Rollback on error
-        loadTableSessions();
-        throw deleteError;
-      }
-      
-      console.log(`Deleted ${deletedRequests?.length || 0} requests from table_requests for ${tableId}`);
-
-      // Clear cart as well (paid orders shouldn't have active cart)
-      const { error: cartError } = await supabase
-        .from('cart_items')
-        .delete()
-        .eq('table_id', tableId);
-
-      if (cartError) {
-        console.error('Error clearing cart after payment:', cartError);
-        // Continue even if cart clear fails
-      }
-
-      // Unlock the table and start new session (do this BEFORE real-time reload)
-      // This ensures the next data load filters out old orders
-      const newSessionStart = new Date().toISOString();
-      const { error: unlockError } = await supabase
-        .from('restaurant_tables')
-        .update({ 
-          is_locked: false,
-          session_started_at: newSessionStart // Start new session when marking as paid
-        })
-        .eq('table_id', tableId);
-      
-      if (unlockError) {
-        console.error('Error unlocking table:', unlockError);
-        // Rollback on error
-        loadTableSessions();
-        throw unlockError;
-      }
-
-      // Mark this table as paid to prevent showing old orders
-      setPaidTables(prev => new Set(prev).add(tableId));
-      
-      // Double-check optimistic update to ensure requests stay cleared
-      // This prevents real-time subscription from showing old orders
-      setTables(prev => {
-        const updated = { ...prev };
-        if (updated[tableId]) {
-          updated[tableId] = {
-            ...updated[tableId],
-            isLocked: false,
-            requests: [], // Ensure requests stay empty
-          };
-        }
-        return updated;
-      });
-
-      // Clear the paid flag after a short delay to allow deletion to complete
-      // This gives time for the database deletion to finish
-      setTimeout(() => {
-        setPaidTables(prev => {
-          const next = new Set(prev);
-          next.delete(tableId);
-          return next;
-        });
-      }, 2000); // 2 second delay to ensure deletion completes
-
-      // Real-time subscription will sync, but optimistic update makes UI feel instant
-    } catch (error) {
-      console.error('Error marking as paid:', error);
-      throw error;
-    }
-  }, [loadTableSessions, tables, completeChildSession]);
+    // Function returns immediately (0ms) - database sync happens in background
+  }, [tables, completeChildSession, broadcastUpdate]);
 
   const resetTable = useCallback(async (tableId: string) => {
-    // Optimistic update: clear everything immediately
+    // Get current state for rollback
+    const currentTable = tablesRef.current[tableId];
+    if (!currentTable) return;
+    
+    // Store original state for rollback
+    const originalState = {
+      isLocked: currentTable.isLocked,
+      isVip: currentTable.isVip,
+      cart: [...currentTable.cart],
+      requests: [...currentTable.requests],
+    };
+    
+    // OPTIMISTIC UPDATE: Clear everything immediately (0ms)
     // This ensures UI updates instantly before database operations complete
     setTables(prev => {
       const updated = { ...prev };
@@ -1185,6 +2299,26 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       
       return updated;
     });
+
+    // Update refs immediately
+    tablesRef.current = {
+      ...tablesRef.current,
+      [tableId]: {
+        ...tablesRef.current[tableId],
+        isLocked: false,
+        isVip: false,
+        cart: [],
+        requests: [],
+      },
+    };
+
+    // Force re-render to show optimistic update instantly
+    setRealtimeUpdateVersion(prev => prev + 1);
+
+    // BROADCAST to all other tabs/windows (0ms, no database)
+    broadcastUpdate('TABLE_CLEARED', { tableId });
+
+    console.log(`⚡ Optimistic update: Table ${tableId} reset instantly (0ms) - ${originalState.requests.length} requests cleared`);
     
     // Mark this table as being reset to prevent real-time from showing old requests
     setPaidTables(prev => new Set(prev).add(tableId));
@@ -1205,11 +2339,53 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       ]);
 
       if (cartResult.error) {
-        console.error('Error fetching cart:', cartResult.error);
+        console.error('❌ Error fetching cart - rolling back optimistic update');
+        // ROLLBACK: Restore original state
+        setTables(prev => {
+          const updated = { ...prev };
+          if (updated[tableId]) {
+            updated[tableId] = {
+              ...updated[tableId],
+              isLocked: originalState.isLocked,
+              isVip: originalState.isVip,
+              cart: originalState.cart,
+              requests: originalState.requests,
+            };
+          }
+          return updated;
+        });
+        
+        // Restore refs
+        tablesRef.current = {
+          ...tablesRef.current,
+          [tableId]: currentTable,
+        };
+        
         throw cartResult.error;
       }
       if (requestsResult.error) {
-        console.error('Error fetching requests:', requestsResult.error);
+        console.error('❌ Error fetching requests - rolling back optimistic update');
+        // ROLLBACK: Restore original state
+        setTables(prev => {
+          const updated = { ...prev };
+          if (updated[tableId]) {
+            updated[tableId] = {
+              ...updated[tableId],
+              isLocked: originalState.isLocked,
+              isVip: originalState.isVip,
+              cart: originalState.cart,
+              requests: originalState.requests,
+            };
+          }
+          return updated;
+        });
+        
+        // Restore refs
+        tablesRef.current = {
+          ...tablesRef.current,
+          [tableId]: currentTable,
+        };
+        
         throw requestsResult.error;
       }
 
@@ -1300,8 +2476,28 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         .select();
 
       if (requestsError) {
-        console.error('Error deleting requests:', requestsError);
-        loadTableSessions();
+        console.error('❌ Error deleting requests - rolling back optimistic update');
+        // ROLLBACK: Restore original state
+        setTables(prev => {
+          const updated = { ...prev };
+          if (updated[tableId]) {
+            updated[tableId] = {
+              ...updated[tableId],
+              isLocked: originalState.isLocked,
+              isVip: originalState.isVip,
+              cart: originalState.cart,
+              requests: originalState.requests,
+            };
+          }
+          return updated;
+        });
+        
+        // Restore refs
+        tablesRef.current = {
+          ...tablesRef.current,
+          [tableId]: currentTable,
+        };
+        
         throw requestsError;
       }
       console.log(`✅ Deleted ${deletedRequests?.length || 0} requests from table_requests for ${tableId} (real-time deletion)`);
@@ -1387,9 +2583,28 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       await loadTableSessions();
 
     } catch (error) {
-      console.error('❌ Error resetting table:', error);
-      // Reload on error to show actual database state
-      loadTableSessions();
+      console.error('❌ Error resetting table - rolling back optimistic update');
+      // ROLLBACK: Restore original state
+      setTables(prev => {
+        const updated = { ...prev };
+        if (updated[tableId]) {
+          updated[tableId] = {
+            ...updated[tableId],
+            isLocked: originalState.isLocked,
+            isVip: originalState.isVip,
+            cart: originalState.cart,
+            requests: originalState.requests,
+          };
+        }
+        return updated;
+      });
+      
+      // Restore refs
+      tablesRef.current = {
+        ...tablesRef.current,
+        [tableId]: currentTable,
+      };
+      
       throw error;
     }
   }, [loadTableSessions]);
@@ -1425,9 +2640,28 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   // Menu management functions
   const addMenuItem = useCallback(async (item: Omit<MenuItem, 'id'>) => {
+    const newId = `item_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Create new menu item object
+    const newMenuItem: MenuItem = {
+      id: newId,
+      cat: item.cat,
+      name: item.name,
+      price: item.price,
+      desc: item.desc || item.description || '',
+      description: item.desc || item.description || '',
+    };
+
+    // OPTIMISTIC UPDATE: Add menu item instantly (0ms)
+    setMenuItems(prev => [...prev, newMenuItem]);
+
+    // BROADCAST to all other tabs/windows (0ms, no database)
+    broadcastUpdate('MENU_ITEM_ADDED', { item: newMenuItem });
+
+    console.log(`⚡ Optimistic update: Menu item added instantly (0ms) - ID: ${newId}`);
+
     try {
-      const newId = `item_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      await supabase
+      const { error } = await supabase
         .from('menu_items')
         .insert({
           id: newId,
@@ -1436,12 +2670,35 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           price: item.price,
           description: item.desc || item.description || null,
         });
+
+      if (error) {
+        console.error('❌ Database insert failed - rolling back optimistic update');
+        // ROLLBACK
+        setMenuItems(prev => prev.filter(i => i.id !== newId));
+        throw error;
+      }
+
+      console.log(`✅ Menu item added to database - ID: ${newId}`);
     } catch (error) {
       console.error('Error adding menu item:', error);
     }
-  }, []);
+  }, [broadcastUpdate]);
 
   const updateMenuItem = useCallback(async (id: string, updates: Partial<MenuItem>) => {
+    // Get current item for rollback
+    const currentItem = menuItems.find(i => i.id === id);
+    if (!currentItem) return;
+
+    // OPTIMISTIC UPDATE: Update menu item instantly (0ms)
+    setMenuItems(prev => prev.map(item =>
+      item.id === id ? { ...item, ...updates } : item
+    ));
+
+    // BROADCAST to all other tabs/windows (0ms, no database)
+    broadcastUpdate('MENU_ITEM_UPDATED', { id, updates });
+
+    console.log(`⚡ Optimistic update: Menu item updated instantly (0ms) - ID: ${id}`);
+
     try {
       const updateData: Partial<DatabaseMenuItem> = {};
       if (updates.cat !== undefined) updateData.cat = updates.cat;
@@ -1451,25 +2708,57 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         updateData.description = updates.desc || updates.description || null;
       }
 
-      await supabase
+      const { error } = await supabase
         .from('menu_items')
         .update(updateData)
         .eq('id', id);
+
+      if (error) {
+        console.error('❌ Database update failed - rolling back optimistic update');
+        // ROLLBACK
+        setMenuItems(prev => prev.map(item =>
+          item.id === id ? currentItem : item
+        ));
+        throw error;
+      }
+
+      console.log(`✅ Menu item updated in database - ID: ${id}`);
     } catch (error) {
       console.error('Error updating menu item:', error);
     }
-  }, []);
+  }, [menuItems, broadcastUpdate]);
 
   const deleteMenuItem = useCallback(async (id: string) => {
+    // Get current item for rollback
+    const currentItem = menuItems.find(i => i.id === id);
+    if (!currentItem) return;
+
+    // OPTIMISTIC UPDATE: Remove menu item instantly (0ms)
+    setMenuItems(prev => prev.filter(item => item.id !== id));
+
+    // BROADCAST to all other tabs/windows (0ms, no database)
+    broadcastUpdate('MENU_ITEM_DELETED', { id });
+
+    console.log(`⚡ Optimistic update: Menu item deleted instantly (0ms) - ID: ${id}`);
+
     try {
-      await supabase
+      const { error } = await supabase
         .from('menu_items')
         .delete()
         .eq('id', id);
+
+      if (error) {
+        console.error('❌ Database delete failed - rolling back optimistic update');
+        // ROLLBACK
+        setMenuItems(prev => [...prev, currentItem]);
+        throw error;
+      }
+
+      console.log(`✅ Menu item deleted from database - ID: ${id}`);
     } catch (error) {
       console.error('Error deleting menu item:', error);
     }
-  }, []);
+  }, [menuItems, broadcastUpdate]);
 
   // Call animator function
   const callAnimator = useCallback(async (tableId: string, source: 'nfc' | 'qr' | 'direct' = 'direct') => {
@@ -1480,7 +2769,8 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     );
 
     if (existingRequest) {
-      // Optimistic update: update timestamp immediately in local state
+      // OPTIMISTIC UPDATE: Update timestamp immediately (0ms)
+      const newTimestamp = Date.now();
       setTables(prev => {
         const updated = { ...prev };
         if (!updated[tableId]) return updated;
@@ -1490,7 +2780,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           requests: updated[tableId].requests.map(req =>
             req.id === existingRequest.id ? {
               ...req,
-              timestamp: Date.now(),
+              timestamp: newTimestamp,
               source: source
             } : req
           ),
@@ -1498,16 +2788,37 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         
         return updated;
       });
+
+      // Update refs immediately
+      tablesRef.current = {
+        ...tablesRef.current,
+        [tableId]: {
+          ...tablesRef.current[tableId],
+          requests: tablesRef.current[tableId].requests.map(req =>
+            req.id === existingRequest.id ? {
+              ...req,
+              timestamp: newTimestamp,
+              source: source
+            } : req
+          ),
+        },
+      };
+
+      // Force re-render
+      setRealtimeUpdateVersion(prev => prev + 1);
+
+      console.log(`⚡ Optimistic update: Animator request timestamp updated instantly (0ms) - ID: ${existingRequest.id}`);
     } else {
-      // Optimistic update: add new request immediately in local state
-      const newRequestId = `req_${Date.now()}`;
+      // OPTIMISTIC UPDATE: Add new request immediately (0ms)
+      const tempRequestId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const timestamp = Date.now();
       const newRequest: TableRequest = {
-        id: newRequestId,
+        id: tempRequestId,
         action: '🎭 АНИМАТОР ЗА ДЕТСКИ КЪТ',
         details: 'Заявка за аниматор',
         total: 0,
         status: 'pending',
-        timestamp: Date.now(),
+        timestamp: timestamp,
         source: source,
         requestType: 'animator',
       };
@@ -1531,75 +2842,212 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         
         return updated;
       });
-    }
 
-    try {
-      // Check if there's already an active animator request for this table
-      const { data: existingRequest } = await supabase
-        .from('table_requests')
-        .select('id, status, child_location')
-        .eq('table_id', tableId)
-        .eq('request_type', 'animator')
-        .in('status', ['pending', 'confirmed'])
-        .order('timestamp', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      // Update refs immediately
+      tablesRef.current = {
+        ...tablesRef.current,
+        [tableId]: {
+          ...tablesRef.current[tableId] || {
+            tableId,
+            isLocked: false,
+            cart: [],
+            requests: [],
+            isVip: false,
+          },
+          requests: [...(tablesRef.current[tableId]?.requests || []), newRequest],
+        },
+      };
 
-      if (existingRequest) {
-        // If there's an active request, just update the timestamp (client is calling again)
-        const { error: updateError } = await supabase
-          .from('table_requests')
-          .update({
-            timestamp: Date.now(),
-            source: source,
-          })
-          .eq('id', existingRequest.id);
+      // Force re-render to show optimistic update instantly
+      setRealtimeUpdateVersion(prev => prev + 1);
 
-        if (updateError) {
-          // Rollback optimistic update on error
-          loadTableSessions();
-          throw updateError;
-        }
-      } else {
-        // Create new request only if there's no active one
-        const requestId = `req_${Date.now()}`;
-        const { error: insertError } = await supabase
-          .from('table_requests')
-          .insert({
-            id: requestId,
-            table_id: tableId,
-            action: '🎭 АНИМАТОР ЗА ДЕТСКИ КЪТ',
-            details: 'Заявка за аниматор',
-            total: 0,
-            status: 'pending',
-            timestamp: Date.now(),
-            source: source,
-            request_type: 'animator',
-          });
-
-        if (insertError) {
-          // Rollback optimistic update on error
-          loadTableSessions();
-          throw insertError;
+      // Trigger instant feedback (0ms) for StaffDashboard (same tab)
+      if (onNewOrderCallbackRef.current) {
+        try {
+          onNewOrderCallbackRef.current('animator', tableId);
+          console.log(`⚡ Instant feedback triggered for optimistic animator call`);
+        } catch (error) {
+          console.error('Error in instant feedback callback:', error);
         }
       }
-      // Real-time subscription will sync the update, but optimistic update makes UI feel instant
-    } catch (error) {
-      console.error('Error calling animator:', error);
-      // Rollback optimistic update on error
-      loadTableSessions();
-      throw error;
+
+      // BROADCAST to all other tabs/windows (0ms, no database)
+      broadcastUpdate('NEW_REQUEST', {
+        tableId,
+        request: newRequest,
+      });
+
+      console.log(`⚡ Optimistic animator request added instantly (0ms) - Temp ID: ${tempRequestId}, Table: ${tableId}`);
+
+      try {
+        // Check if there's already an active animator request for this table
+        const { data: existingRequest } = await supabase
+          .from('table_requests')
+          .select('id, status, child_location')
+          .eq('table_id', tableId)
+          .eq('request_type', 'animator')
+          .in('status', ['pending', 'confirmed'])
+          .order('timestamp', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (existingRequest) {
+          // If there's an active request, just update the timestamp (client is calling again)
+          const { error: updateError } = await supabase
+            .from('table_requests')
+            .update({
+              timestamp: timestamp,
+              source: source,
+            })
+            .eq('id', existingRequest.id);
+
+          if (updateError) {
+            // ROLLBACK: Remove optimistic update on error
+            console.error('❌ Database update failed - rolling back optimistic update');
+            setTables(prev => {
+              const updated = { ...prev };
+              if (updated[tableId]) {
+                updated[tableId] = {
+                  ...updated[tableId],
+                  requests: updated[tableId].requests.filter(req => req.id !== tempRequestId),
+                };
+              }
+              return updated;
+            });
+            
+            // Restore refs
+            tablesRef.current = {
+              ...tablesRef.current,
+              [tableId]: {
+                ...tablesRef.current[tableId],
+                requests: tablesRef.current[tableId].requests.filter(req => req.id !== tempRequestId),
+              },
+            };
+            
+            throw updateError;
+          }
+          
+          // Replace temp ID with existing request ID
+          setTables(prev => {
+            const updated = { ...prev };
+            if (updated[tableId]) {
+              updated[tableId] = {
+                ...updated[tableId],
+                requests: updated[tableId].requests.map(req =>
+                  req.id === tempRequestId ? { ...req, id: existingRequest.id } : req
+                ),
+              };
+            }
+            return updated;
+          });
+          
+          // Update refs
+          tablesRef.current = {
+            ...tablesRef.current,
+            [tableId]: {
+              ...tablesRef.current[tableId],
+              requests: tablesRef.current[tableId].requests.map(req =>
+                req.id === tempRequestId ? { ...req, id: existingRequest.id } : req
+              ),
+            },
+          };
+          
+          console.log(`✅ Animator request synced with database - Real ID: ${existingRequest.id}`);
+        } else {
+          // Create new request only if there's no active one
+          const realRequestId = `req_${Date.now()}`;
+          const { error: insertError } = await supabase
+            .from('table_requests')
+            .insert({
+              id: realRequestId,
+              table_id: tableId,
+              action: '🎭 АНИМАТОР ЗА ДЕТСКИ КЪТ',
+              details: 'Заявка за аниматор',
+              total: 0,
+              status: 'pending',
+              timestamp: timestamp,
+              source: source,
+              request_type: 'animator',
+            });
+
+          if (insertError) {
+            // ROLLBACK: Remove optimistic update on error
+            console.error('❌ Database insert failed - rolling back optimistic update');
+            setTables(prev => {
+              const updated = { ...prev };
+              if (updated[tableId]) {
+                updated[tableId] = {
+                  ...updated[tableId],
+                  requests: updated[tableId].requests.filter(req => req.id !== tempRequestId),
+                };
+              }
+              return updated;
+            });
+            
+            // Restore refs
+            tablesRef.current = {
+              ...tablesRef.current,
+              [tableId]: {
+                ...tablesRef.current[tableId],
+                requests: tablesRef.current[tableId].requests.filter(req => req.id !== tempRequestId),
+              },
+            };
+            
+            throw insertError;
+          }
+
+          // Replace temp ID with real ID from database
+          setTables(prev => {
+            const updated = { ...prev };
+            if (updated[tableId]) {
+              updated[tableId] = {
+                ...updated[tableId],
+                requests: updated[tableId].requests.map(req =>
+                  req.id === tempRequestId ? { ...req, id: realRequestId } : req
+                ),
+              };
+            }
+            return updated;
+          });
+          
+          // Update refs
+          tablesRef.current = {
+            ...tablesRef.current,
+            [tableId]: {
+              ...tablesRef.current[tableId],
+              requests: tablesRef.current[tableId].requests.map(req =>
+                req.id === tempRequestId ? { ...req, id: realRequestId } : req
+              ),
+            },
+          };
+          
+          console.log(`✅ Animator request synced with database - Real ID: ${realRequestId}`);
+        }
+      } catch (error) {
+        console.error('Error syncing animator request with database:', error);
+        throw error;
+      }
     }
   }, [tables, loadTableSessions]);
 
   // Complete animator request (only animator can do this) - starts timer
   const completeAnimatorRequest = useCallback(async (tableId: string, requestId: string, animatorName: string) => {
-    // Optimistic update: update request status immediately in local state
+    // Get current state for rollback
+    const currentTable = tablesRef.current[tableId];
+    const currentRequest = currentTable?.requests.find(r => r.id === requestId);
+    
+    if (!currentRequest) {
+      console.error('Request not found for optimistic update');
+      return;
+    }
+
+    const nowTimestamp = Date.now();
+
+    // OPTIMISTIC UPDATE: Update request status instantly (0ms)
     setTables(prev => {
       const updated = { ...prev };
       if (!updated[tableId]) return updated;
       
-      const nowTimestamp = Date.now();
       updated[tableId] = {
         ...updated[tableId],
         requests: updated[tableId].requests.map(req =>
@@ -1619,8 +3067,53 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       return updated;
     });
 
+    // Update refs immediately
+    tablesRef.current = {
+      ...tablesRef.current,
+      [tableId]: {
+        ...tablesRef.current[tableId],
+        requests: tablesRef.current[tableId].requests.map(req =>
+          req.id === requestId ? {
+            ...req,
+            status: 'confirmed' as const,
+            assignedTo: animatorName,
+            childLocation: 'kids_zone' as const,
+            timerStartedAt: nowTimestamp,
+            timerPausedAt: undefined,
+            totalTimeElapsed: 0,
+            hourlyRate: 10.00
+          } : req
+        ),
+      },
+    };
+
+    // Force re-render
+    setRealtimeUpdateVersion(prev => prev + 1);
+
+    // BROADCAST to all other tabs/windows (0ms, no database)
+    broadcastUpdate('REQUEST_UPDATED', {
+      tableId,
+      requestId,
+      updates: { 
+        status: 'confirmed',
+        assignedTo: animatorName,
+        childLocation: 'kids_zone',
+        timerStartedAt: nowTimestamp,
+        timerPausedAt: undefined,
+        totalTimeElapsed: 0,
+        hourlyRate: 10.00
+      },
+    });
+
+    console.log(`⚡ Optimistic update: Animator request confirmed instantly (0ms) - Request: ${requestId}`);
+
+    // If this is a temporary ID, skip database operations
+    if (requestId.startsWith('temp_')) {
+      console.log(`⏳ Request ${requestId} is temporary - skipping database sync, will sync when real ID is assigned`);
+      return;
+    }
+
     try {
-      const nowTimestamp = Date.now(); // Use timestamp (milliseconds) for BIGINT field
       const { error: updateError } = await supabase
         .from('table_requests')
         .update({ 
@@ -1630,135 +3123,299 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           timer_started_at: nowTimestamp,
           timer_paused_at: null,
           total_time_elapsed: 0,
-          hourly_rate: 10.00 // Default 10 EUR per hour
+          hourly_rate: 10.00
         })
         .eq('id', requestId)
         .eq('table_id', tableId)
         .eq('request_type', 'animator');
       
       if (updateError) {
-        console.error('Error completing animator request:', updateError);
-        // Rollback optimistic update on error
-        loadTableSessions();
+        console.error('❌ Database update failed - rolling back optimistic update');
+        // ROLLBACK
+        setTables(prev => {
+          const updated = { ...prev };
+          if (updated[tableId]) {
+            updated[tableId] = {
+              ...updated[tableId],
+              requests: updated[tableId].requests.map(req =>
+                req.id === requestId ? currentRequest : req
+              ),
+            };
+          }
+          return updated;
+        });
+        tablesRef.current = {
+          ...tablesRef.current,
+          [tableId]: currentTable,
+        };
         throw updateError;
       }
-      // Real-time subscription will sync the update, but optimistic update makes UI feel instant
+      
+      console.log(`✅ Animator request confirmed in database - Request: ${requestId}`);
     } catch (error) {
       console.error('Error completing animator request:', error);
-      // Rollback optimistic update on error
-      loadTableSessions();
-      throw error;
+      // Don't throw - optimistic update is already applied
     }
-  }, [loadTableSessions]);
+  }, [broadcastUpdate]);
 
   // Return child to table - pauses timer
   const returnChildToTable = useCallback(async (tableId: string, requestId: string) => {
+    // Get current state for optimistic update
+    const currentTable = tablesRef.current[tableId];
+    const currentRequest = currentTable?.requests.find(r => r.id === requestId);
+    
+    if (!currentRequest) {
+      console.error('Request not found for optimistic update');
+      return;
+    }
+
+    const nowTimestamp = Date.now();
+    let newElapsed = currentRequest.totalTimeElapsed || 0;
+
+    // If timer was running, add the elapsed time since it started
+    if (currentRequest.timerStartedAt && !currentRequest.timerPausedAt) {
+      const elapsedSinceStart = Math.floor((nowTimestamp - currentRequest.timerStartedAt) / 1000);
+      newElapsed += elapsedSinceStart;
+    }
+
+    // OPTIMISTIC UPDATE: Update child location instantly (0ms)
+    setTables(prev => {
+      const updated = { ...prev };
+      if (!updated[tableId]) return updated;
+      
+      updated[tableId] = {
+        ...updated[tableId],
+        requests: updated[tableId].requests.map(req =>
+          req.id === requestId ? {
+            ...req,
+            childLocation: 'returning_to_table' as const,
+            timerPausedAt: nowTimestamp,
+            totalTimeElapsed: newElapsed
+          } : req
+        ),
+      };
+      
+      return updated;
+    });
+
+    // Update refs immediately
+    tablesRef.current = {
+      ...tablesRef.current,
+      [tableId]: {
+        ...tablesRef.current[tableId],
+        requests: tablesRef.current[tableId].requests.map(req =>
+          req.id === requestId ? {
+            ...req,
+            childLocation: 'returning_to_table' as const,
+            timerPausedAt: nowTimestamp,
+            totalTimeElapsed: newElapsed
+          } : req
+        ),
+      },
+    };
+
+    // Force re-render
+    setRealtimeUpdateVersion(prev => prev + 1);
+
+    // BROADCAST to all other tabs/windows (0ms, no database)
+    broadcastUpdate('REQUEST_UPDATED', {
+      tableId,
+      requestId,
+      updates: { 
+        childLocation: 'returning_to_table',
+        timerPausedAt: nowTimestamp,
+        totalTimeElapsed: newElapsed
+      },
+    });
+
+    console.log(`⚡ Optimistic update: Child returning to table instantly (0ms) - Request: ${requestId}`);
+
+    // If this is a temporary ID, skip database operations
+    // The real ID will be assigned when the real-time subscription receives the INSERT event
+    if (requestId.startsWith('temp_')) {
+      console.log(`⏳ Request ${requestId} is temporary - skipping database sync, will sync when real ID is assigned`);
+      return;
+    }
+
     try {
-      // Get current request to calculate elapsed time
-      const { data: currentRequest, error: fetchError } = await supabase
+      // Get current request from database to calculate elapsed time accurately
+      const { data: dbRequest, error: fetchError } = await supabase
         .from('table_requests')
         .select('timer_started_at, timer_paused_at, total_time_elapsed')
         .eq('id', requestId)
         .eq('table_id', tableId)
         .single();
 
-      if (fetchError || !currentRequest) {
-        throw fetchError || new Error('Request not found');
+      if (fetchError || !dbRequest) {
+        // If request not found, it might still be syncing - don't throw, just log
+        console.warn(`⚠️ Request ${requestId} not found in database yet - local state updated, will sync later`);
+        return;
       }
 
-      const nowTimestamp = Date.now(); // Use timestamp (milliseconds) for BIGINT field
-      let newElapsed = currentRequest.total_time_elapsed || 0;
+      let dbNewElapsed = dbRequest.total_time_elapsed || 0;
 
       // If timer was running, add the elapsed time since it started
-      if (currentRequest.timer_started_at && !currentRequest.timer_paused_at) {
-        // timer_started_at is stored as BIGINT (timestamp in milliseconds)
-        const timerStartedAt = typeof currentRequest.timer_started_at === 'string' 
-          ? parseInt(currentRequest.timer_started_at, 10)
-          : currentRequest.timer_started_at;
+      if (dbRequest.timer_started_at && !dbRequest.timer_paused_at) {
+        const timerStartedAt = typeof dbRequest.timer_started_at === 'string' 
+          ? parseInt(dbRequest.timer_started_at, 10)
+          : dbRequest.timer_started_at;
         const elapsedSinceStart = Math.floor((nowTimestamp - timerStartedAt) / 1000);
-        newElapsed += elapsedSinceStart;
+        dbNewElapsed += elapsedSinceStart;
       }
 
       const { error: updateError } = await supabase
         .from('table_requests')
         .update({ 
           child_location: 'returning_to_table',
-          timer_paused_at: nowTimestamp, // Use timestamp instead of ISO string
-          total_time_elapsed: newElapsed
+          timer_paused_at: nowTimestamp,
+          total_time_elapsed: dbNewElapsed
         })
         .eq('id', requestId)
         .eq('table_id', tableId);
 
       if (updateError) {
-        console.error('Error returning child to table:', updateError);
-        loadTableSessions();
+        console.error('❌ Database update failed - rolling back optimistic update');
+        // ROLLBACK
+        setTables(prev => {
+          const updated = { ...prev };
+          if (updated[tableId]) {
+            updated[tableId] = {
+              ...updated[tableId],
+              requests: updated[tableId].requests.map(req =>
+                req.id === requestId ? currentRequest : req
+              ),
+            };
+          }
+          return updated;
+        });
+        tablesRef.current = {
+          ...tablesRef.current,
+          [tableId]: currentTable,
+        };
         throw updateError;
       }
+      
+      console.log(`✅ Child returning to table synced with database - Request: ${requestId}`);
     } catch (error) {
       console.error('Error returning child to table:', error);
-      loadTableSessions();
-      throw error;
+      // Don't throw - optimistic update is already applied
     }
-  }, [loadTableSessions]);
+  }, [broadcastUpdate]);
 
   // Take child back to zone - resumes timer
   const takeChildBackToZone = useCallback(async (tableId: string, requestId: string) => {
-    // Optimistic update: update request immediately in local state
-    const currentTable = tables[tableId];
+    // Get current state for optimistic update and rollback
+    const currentTable = tablesRef.current[tableId];
     const currentRequest = currentTable?.requests.find(r => r.id === requestId);
     
-    if (currentRequest) {
-      const nowTimestamp = Date.now();
-      const currentElapsed = currentRequest.totalTimeElapsed || 0;
+    if (!currentRequest) {
+      console.error('Request not found for optimistic update');
+      return;
+    }
 
-      setTables(prev => {
-        const updated = { ...prev };
-        if (!updated[tableId]) return updated;
-        
-        updated[tableId] = {
-          ...updated[tableId],
-          requests: updated[tableId].requests.map(req =>
-            req.id === requestId ? {
-              ...req,
-              childLocation: 'kids_zone' as const,
-              timerStartedAt: nowTimestamp,
-              timerPausedAt: undefined,
-              totalTimeElapsed: currentElapsed // Keep existing elapsed time
-            } : req
-          ),
-        };
-        
-        return updated;
-      });
+    const nowTimestamp = Date.now();
+    const currentElapsed = currentRequest.totalTimeElapsed || 0;
+
+    // OPTIMISTIC UPDATE: Update child location instantly (0ms)
+    setTables(prev => {
+      const updated = { ...prev };
+      if (!updated[tableId]) return updated;
+      
+      updated[tableId] = {
+        ...updated[tableId],
+        requests: updated[tableId].requests.map(req =>
+          req.id === requestId ? {
+            ...req,
+            childLocation: 'kids_zone' as const,
+            timerStartedAt: nowTimestamp,
+            timerPausedAt: undefined,
+            totalTimeElapsed: currentElapsed
+          } : req
+        ),
+      };
+      
+      return updated;
+    });
+
+    // Update refs immediately
+    tablesRef.current = {
+      ...tablesRef.current,
+      [tableId]: {
+        ...tablesRef.current[tableId],
+        requests: tablesRef.current[tableId].requests.map(req =>
+          req.id === requestId ? {
+            ...req,
+            childLocation: 'kids_zone' as const,
+            timerStartedAt: nowTimestamp,
+            timerPausedAt: undefined,
+            totalTimeElapsed: currentElapsed
+          } : req
+        ),
+      },
+    };
+
+    // Force re-render
+    setRealtimeUpdateVersion(prev => prev + 1);
+
+    // BROADCAST to all other tabs/windows (0ms, no database)
+    broadcastUpdate('REQUEST_UPDATED', {
+      tableId,
+      requestId,
+      updates: { 
+        childLocation: 'kids_zone',
+        timerStartedAt: nowTimestamp,
+        timerPausedAt: undefined,
+        totalTimeElapsed: currentElapsed
+      },
+    });
+
+    console.log(`⚡ Optimistic update: Child back to zone instantly (0ms) - Request: ${requestId}`);
+
+    // If this is a temporary ID, skip database operations
+    if (requestId.startsWith('temp_')) {
+      console.log(`⏳ Request ${requestId} is temporary - skipping database sync, will sync when real ID is assigned`);
+      return;
     }
 
     try {
-      const nowTimestamp = Date.now(); // Use timestamp (milliseconds) for BIGINT field
       const { error: updateError } = await supabase
         .from('table_requests')
         .update({ 
           child_location: 'kids_zone',
-          timer_started_at: nowTimestamp, // Restart timer from now (timestamp)
+          timer_started_at: nowTimestamp,
           timer_paused_at: null
         })
         .eq('id', requestId)
         .eq('table_id', tableId);
 
       if (updateError) {
-        console.error('Error taking child back to zone:', updateError);
-        console.error('Update details:', { tableId, requestId, nowTimestamp });
-        // Rollback optimistic update on error
-        loadTableSessions();
+        console.error('❌ Database update failed - rolling back optimistic update');
+        // ROLLBACK
+        setTables(prev => {
+          const updated = { ...prev };
+          if (updated[tableId]) {
+            updated[tableId] = {
+              ...updated[tableId],
+              requests: updated[tableId].requests.map(req =>
+                req.id === requestId ? currentRequest : req
+              ),
+            };
+          }
+          return updated;
+        });
+        tablesRef.current = {
+          ...tablesRef.current,
+          [tableId]: currentTable,
+        };
         throw updateError;
       }
-      // Real-time subscription will sync the update, but optimistic update makes UI feel instant
+      
+      console.log(`✅ Child back to zone synced with database - Request: ${requestId}`);
     } catch (error) {
       console.error('Error taking child back to zone:', error);
-      // Rollback optimistic update on error
-      loadTableSessions();
-      throw error;
+      // Don't throw - optimistic update is already applied
     }
-  }, [loadTableSessions, tables]);
+  }, [broadcastUpdate]);
 
   // Mark only bill requests as paid (leave orders untouched)
   const markBillRequestsAsPaid = useCallback(async (tableId: string) => {
@@ -1902,11 +3559,15 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
         if (error) throw error;
       }
+
+      // BROADCAST to all other tabs/windows (0ms)
+      broadcastUpdate('DAILY_MENU_UPDATED', { date, itemIds });
+      console.log(`⚡ Daily menu updated and broadcast - Date: ${date}`);
     } catch (error) {
       console.error('Error setting daily menu items:', error);
       throw error;
     }
-  }, []);
+  }, [broadcastUpdate]);
 
   const toggleDailyMenuItemVisibility = useCallback(async (itemId: string, date: string, isVisible: boolean) => {
     try {
@@ -1983,10 +3644,16 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   }, [tables]);
 
   // Memoize context value to prevent unnecessary re-renders
-  const contextValue = useMemo(() => ({
+  // Include realtimeUpdateVersion to force re-render on real-time updates
+  const contextValue = useMemo(() => {
+    // #region agent log
+    fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:2062',message:'contextValue useMemo recalculated',data:{realtimeUpdateVersion,tablesCount:Object.keys(tables).length,menuItemsCount:menuItems.length,loading},timestamp:Date.now(),runId:'run1',hypothesisId:'H'})}).catch(()=>{});
+    // #endregion
+    return {
       tables,
     menuItems,
     loading,
+    realtimeUpdateVersion, // Include version to trigger re-renders
       getTableSession,
       addToCart,
       removeFromCart,
@@ -2016,10 +3683,12 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     getRevenueReport,
     getPendingOrders,
     loadTableSessions,
-  }), [
+  };
+  }, [
       tables,
     menuItems,
     loading,
+    realtimeUpdateVersion, // Include in dependencies
       getTableSession,
       addToCart,
       removeFromCart,
