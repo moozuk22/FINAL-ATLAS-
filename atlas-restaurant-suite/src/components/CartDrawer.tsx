@@ -72,7 +72,13 @@ const SortableCartItem: React.FC<{
   return (
     <div
       ref={setNodeRef}
-      style={style}
+      style={{
+        ...style,
+        touchAction: 'none', // Enable drag on touch devices
+        WebkitTouchCallout: 'none', // Disable iOS callout
+        WebkitUserSelect: 'none', // Disable text selection
+        userSelect: 'none',
+      }}
       {...attributes}
       {...listeners}
       className={cn(
@@ -83,12 +89,6 @@ const SortableCartItem: React.FC<{
         // Prevent drag when interacting with buttons
         '[&_button]:pointer-events-auto [&_button]:z-20 [&_button]:touch-action-manipulation'
       )}
-      style={{
-        touchAction: 'none', // Enable drag on touch devices
-        WebkitTouchCallout: 'none', // Disable iOS callout
-        WebkitUserSelect: 'none', // Disable text selection
-        userSelect: 'none',
-      }}
       onTouchStart={(e) => {
         // Allow drag on touch devices - buttons will still work due to pointer-events-auto
         const target = e.target as HTMLElement;
@@ -270,7 +270,13 @@ const SortableKidsZoneRow: React.FC<{ time?: string }> = ({ time }) => {
   return (
     <div
       ref={setNodeRef}
-      style={style}
+      style={{
+        ...style,
+        touchAction: 'none', // Enable drag on touch devices
+        WebkitTouchCallout: 'none', // Disable iOS callout
+        WebkitUserSelect: 'none', // Disable text selection
+        userSelect: 'none',
+      }}
       {...attributes}
       {...listeners}
       className={cn(
@@ -279,12 +285,6 @@ const SortableKidsZoneRow: React.FC<{ time?: string }> = ({ time }) => {
         isDragging && 'shadow-lg ring-2 ring-primary/20 z-50 cursor-grabbing opacity-90',
         !isDragging && 'cursor-grab active:cursor-grabbing min-h-[44px]'
       )}
-      style={{
-        touchAction: 'none', // Enable drag on touch devices
-        WebkitTouchCallout: 'none', // Disable iOS callout
-        WebkitUserSelect: 'none', // Disable text selection
-        userSelect: 'none',
-      }}
       onTouchStart={(e) => {
         // Ensure touch events work properly for drag
         const target = e.target as HTMLElement;
