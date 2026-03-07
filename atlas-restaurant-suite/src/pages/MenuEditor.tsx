@@ -9,6 +9,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { stripAllergenNumbersFromName } from '@/utils/menu';
 import { cn } from '@/lib/utils';
+import { supabase } from '@/lib/supabase';
 import {
   Dialog,
   DialogContent,
@@ -335,6 +336,43 @@ const DraggableMenuItem: React.FC<{
 };
 
 // Droppable Category Section Component
+// Sortable Category Section Wrapper
+const SortableCategorySection: React.FC<{
+  category: string;
+  items: MenuItem[];
+  onEdit: (item: MenuItem) => void;
+  onDelete: (id: string) => void;
+  onRenameCategory: (oldName: string, newName: string) => void;
+  onDeleteCategory: (categoryName: string) => void;
+  onMergeCategory: (sourceCategory: string) => void;
+  isUnassigned?: boolean;
+  selectedItems?: Set<string>;
+  onToggleSelect?: (id: string) => void;
+  isBulkMode?: boolean;
+}> = (props) => {
+  const { category } = props;
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: `category_${category}` });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition: isDragging ? 'none' : transition,
+    opacity: isDragging ? 0.6 : 1,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing [&_button]:pointer-events-auto [&_input]:pointer-events-auto">
+      <CategorySection {...props} />
+    </div>
+  );
+};
+
 const CategorySection: React.FC<{
   category: string;
   items: MenuItem[];
@@ -506,7 +544,7 @@ const NewCategorySection: React.FC<{
 const MenuEditor: React.FC = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { menuItems, addMenuItem, updateMenuItem, deleteMenuItem, getDailyMenuItems, setDailyMenuItems, loading, realtimeUpdateVersion } = useRestaurant();
+  const { menuItems, addMenuItem, updateMenuItem, deleteMenuItem, getDailyMenuItems, setDailyMenuItems, getCategoryOrder, setCategoryOrder: saveCategoryOrder, getItemOrder, setItemOrder: saveItemOrder, loading, realtimeUpdateVersion } = useRestaurant();
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [formData, setFormData] = useState({
@@ -569,6 +607,52 @@ const MenuEditor: React.FC = () => {
     return item;
   });
 
+  // Item order state per category
+  const [itemOrders, setItemOrders] = useState<Record<string, string[]>>({});
+
+  // Load item orders from database on mount
+  useEffect(() => {
+    const loadItemOrders = async () => {
+      const categories = Object.keys(displayItems.reduce((acc, item) => {
+        const category = item.cat && item.cat.trim() ? item.cat.trim() : '📦 Unassigned';
+        acc[category] = true;
+        return acc;
+      }, {} as Record<string, boolean>));
+
+      const orders: Record<string, string[]> = {};
+      for (const category of categories) {
+        try {
+          const order = await getItemOrder(category);
+          if (order.length > 0) {
+            orders[category] = order;
+          } else {
+            // Fallback to localStorage
+            const savedOrder = localStorage.getItem(`menuItemOrder_${category}`);
+            if (savedOrder) {
+              try {
+                orders[category] = JSON.parse(savedOrder);
+              } catch (e) {
+                // Ignore
+              }
+            }
+          }
+        } catch (e) {
+          // Fallback to localStorage
+          const savedOrder = localStorage.getItem(`menuItemOrder_${category}`);
+          if (savedOrder) {
+            try {
+              orders[category] = JSON.parse(savedOrder);
+            } catch (e2) {
+              // Ignore
+            }
+          }
+        }
+      }
+      setItemOrders(orders);
+    };
+    loadItemOrders();
+  }, [displayItems, getItemOrder]);
+
   // Group items by category, handling unassigned items
   const groupedItems = useMemo(() => {
     const grouped = displayItems.reduce((acc, item) => {
@@ -583,11 +667,9 @@ const MenuEditor: React.FC = () => {
 
     // Apply saved order for each category
     Object.keys(grouped).forEach(category => {
-      const orderKey = `menuItemOrder_${category}`;
-      const savedOrder = localStorage.getItem(orderKey);
-      if (savedOrder) {
+      const itemIds = itemOrders[category];
+      if (itemIds && itemIds.length > 0) {
         try {
-          const itemIds = JSON.parse(savedOrder) as string[];
           const itemsById = new Map(grouped[category].map(item => [item.id, item]));
           const orderedItems: MenuItem[] = [];
           const unorderedItems: MenuItem[] = [];
@@ -614,7 +696,7 @@ const MenuEditor: React.FC = () => {
     });
 
     return grouped;
-  }, [displayItems, itemOrderUpdate]);
+  }, [displayItems, itemOrders, itemOrderUpdate]);
 
   // Get all unique categories for creating new ones
   const allCategories = useMemo(() => 
@@ -622,40 +704,101 @@ const MenuEditor: React.FC = () => {
     [groupedItems]
   );
 
-  // Load category order from localStorage on mount
+  // Load category order from database on mount
   useEffect(() => {
-    const savedOrder = localStorage.getItem('menuCategoryOrder');
-    if (savedOrder) {
+    const loadCategoryOrder = async () => {
       try {
-        const parsed = JSON.parse(savedOrder);
-        if (Array.isArray(parsed)) {
-          setCategoryOrder(parsed);
+        const order = await getCategoryOrder();
+        if (order.length > 0) {
+          setCategoryOrder(order);
         }
       } catch (e) {
         console.error('Error loading category order:', e);
+        // Fallback to localStorage
+        const savedOrder = localStorage.getItem('menuCategoryOrder');
+        if (savedOrder) {
+          try {
+            const parsed = JSON.parse(savedOrder);
+            if (Array.isArray(parsed)) {
+              setCategoryOrder(parsed);
+            }
+          } catch (e2) {
+            console.error('Error loading category order from localStorage:', e2);
+          }
+        }
       }
-    }
-  }, []);
+    };
+    loadCategoryOrder();
+  }, [getCategoryOrder]);
 
-  // Save category order to localStorage when it changes
+  // Save category order to database when it changes
   useEffect(() => {
-    if (categoryOrder.length > 0) {
-      localStorage.setItem('menuCategoryOrder', JSON.stringify(categoryOrder));
+    if (categoryOrder && categoryOrder.length > 0) {
+      saveCategoryOrder(categoryOrder).catch(error => {
+        console.error('Error saving category order:', error);
+      });
     }
-  }, [categoryOrder]);
+  }, [categoryOrder, saveCategoryOrder]);
 
   // Sort categories by saved order, then alphabetically
   const sortedCategories = useMemo(() => {
     const categories = Object.keys(groupedItems).filter(cat => cat !== '📦 Unassigned');
-    if (categoryOrder.length === 0) {
+    const order = categoryOrder || [];
+    if (!Array.isArray(order) || order.length === 0) {
       return categories.sort((a, b) => a.localeCompare(b));
     }
     
     // Sort by saved order, then alphabetically for new categories
-    const ordered = categoryOrder.filter(cat => categories.includes(cat));
-    const unordered = categories.filter(cat => !categoryOrder.includes(cat)).sort((a, b) => a.localeCompare(b));
+    const ordered = order.filter(cat => categories.includes(cat));
+    const unordered = categories.filter(cat => !order.includes(cat)).sort((a, b) => a.localeCompare(b));
     return [...ordered, ...unordered];
   }, [groupedItems, categoryOrder]);
+
+  // Real-time subscription for item order changes
+  useEffect(() => {
+    const itemOrderSubscription = supabase
+      .channel('menu_editor_item_order_realtime')
+      .on('postgres_changes',
+        { 
+          event: '*',
+          schema: 'public', 
+          table: 'menu_settings',
+          filter: 'key=like.item_order_%'
+        },
+        async (payload) => {
+          console.log('📅 MenuEditor: Real-time item order change:', payload.eventType);
+          try {
+            if (payload.new && payload.new.value && payload.new.key) {
+              const category = payload.new.key.replace('item_order_', '');
+              const order = JSON.parse(payload.new.value);
+              setItemOrders(prev => ({ ...prev, [category]: order }));
+              // Also update localStorage as backup
+              localStorage.setItem(`menuItemOrder_${category}`, JSON.stringify(order));
+            } else if (payload.old && payload.old.key) {
+              // If deleted, fallback to localStorage
+              const category = payload.old.key.replace('item_order_', '');
+              const savedOrder = localStorage.getItem(`menuItemOrder_${category}`);
+              if (savedOrder) {
+                try {
+                  setItemOrders(prev => ({ ...prev, [category]: JSON.parse(savedOrder) }));
+                } catch (e) {
+                  console.error('Error parsing item order from localStorage:', e);
+                }
+              }
+            }
+          } catch (error) {
+            console.error('Error processing item order update:', error);
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.log('📡 MenuEditor item order subscription status:', status);
+      });
+
+    return () => {
+      supabase.removeChannel(itemOrderSubscription);
+    };
+  }, []);
 
   // Clear optimistic updates when menuItems change from real-time subscription
   // This ensures the UI stays in sync with the database
@@ -747,15 +890,54 @@ const MenuEditor: React.FC = () => {
     setDraggedItem(item || null);
   };
 
-  const handleDragEnd = async (event: DragEndEvent) => {
+  const handleDragEnd = useCallback(async (event: DragEndEvent) => {
     const { active, over } = event;
     setDraggedItem(null);
 
     if (!over || active.id === over.id) return;
 
-    const item = displayItems.find(i => i.id === active.id);
+    const activeId = active.id as string;
     const targetId = over.id as string;
 
+    // Check if dragging a category
+    if (activeId.startsWith('category_') && targetId.startsWith('category_')) {
+      const activeCategory = activeId.replace('category_', '');
+      const targetCategory = targetId.replace('category_', '');
+      
+      if (activeCategory === targetCategory) return;
+      
+      setCategoryOrder((currentOrder) => {
+        const activeIndex = currentOrder.indexOf(activeCategory);
+        const targetIndex = currentOrder.indexOf(targetCategory);
+        
+        if (activeIndex !== -1 && targetIndex !== -1) {
+          const newOrder = [...currentOrder];
+          const [moved] = newOrder.splice(activeIndex, 1);
+          newOrder.splice(targetIndex, 0, moved);
+          
+          // Save to database
+          saveCategoryOrder(newOrder).catch(error => {
+            console.error('Error saving category order:', error);
+            toast({
+              title: 'Error',
+              description: 'Failed to save category order',
+              variant: 'destructive',
+            });
+          });
+          
+          toast({
+            title: 'Success',
+            description: `Reordered categories`,
+          });
+          
+          return newOrder;
+        }
+        return currentOrder;
+      });
+      return;
+    }
+
+    const item = displayItems.find(i => i.id === active.id);
     if (!item || !targetId) return;
 
     // Check if dropping on another item (for reordering within same category)
@@ -771,13 +953,19 @@ const MenuEditor: React.FC = () => {
         const newIndex = categoryItems.findIndex(i => i.id === targetId);
         
         if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
-          // Save new order to localStorage
-          const orderKey = `menuItemOrder_${currentCategory}`;
+          // Save new order to database
           const newOrder = [...categoryItems];
           const [movedItem] = newOrder.splice(oldIndex, 1);
           newOrder.splice(newIndex, 0, movedItem);
           const itemIds = newOrder.map(i => i.id);
-          localStorage.setItem(orderKey, JSON.stringify(itemIds));
+          
+          // Update local state
+          setItemOrders(prev => ({ ...prev, [currentCategory]: itemIds }));
+          
+          // Save to database
+          saveItemOrder(currentCategory, itemIds).catch(error => {
+            console.error('Error saving item order:', error);
+          });
           
           // Trigger re-render by updating state
           setItemOrderUpdate(prev => prev + 1);
@@ -841,7 +1029,7 @@ const MenuEditor: React.FC = () => {
         variant: 'destructive',
       });
     }
-  };
+  }, [saveCategoryOrder, toast, displayItems, groupedItems, updateMenuItem, showNewCategoryInput, newCategoryName, allCategories, setItemOrderUpdate]);
 
   const handleCreateCategory = () => {
     if (!newCategoryName.trim()) {
@@ -1553,47 +1741,52 @@ const MenuEditor: React.FC = () => {
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
           >
-            <div className="space-y-4 sm:space-y-6 md:space-y-8 animate-in fade-in duration-300">
-              {/* Show Unassigned first if it exists */}
-              {groupedItems['📦 Unassigned'] && (
-                <CategorySection
-                  key="📦 Unassigned"
-                  category="📦 Unassigned"
-                  items={groupedItems['📦 Unassigned']}
-                  onEdit={handleEdit}
-                  onDelete={handleDelete}
-                  onRenameCategory={handleRenameCategory}
-                  onDeleteCategory={handleDeleteCategory}
-                  onMergeCategory={handleMergeCategory}
-                  isUnassigned={true}
-                  selectedItems={selectedItems}
-                  onToggleSelect={handleToggleSelect}
-                  isBulkMode={isBulkMode}
-                />
-              )}
-              {/* Show all other categories in sorted order */}
-              {sortedCategories.map(category => (
-                <CategorySection
-                  key={category}
-                  category={category}
-                  items={groupedItems[category] || []}
-                  onEdit={handleEdit}
-                  onDelete={handleDelete}
-                  onRenameCategory={handleRenameCategory}
-                  onDeleteCategory={handleDeleteCategory}
-                  onMergeCategory={handleMergeCategory}
-                  selectedItems={selectedItems}
-                  onToggleSelect={handleToggleSelect}
-                  isBulkMode={isBulkMode}
-                />
-              ))}
-              {/* Show empty category placeholder if creating new category - make it droppable */}
-              {showNewCategoryInput && newCategoryName.trim() && !allCategories.includes(newCategoryName.trim()) && (
-                <NewCategorySection
-                  categoryName={newCategoryName.trim()}
-                />
-              )}
-            </div>
+            <SortableContext
+              items={[...sortedCategories.map(c => `category_${c}`), ...(groupedItems['📦 Unassigned'] ? ['category_📦 Unassigned'] : [])]}
+              strategy={verticalListSortingStrategy}
+            >
+              <div className="space-y-4 sm:space-y-6 md:space-y-8 animate-in fade-in duration-300">
+                {/* Show Unassigned first if it exists */}
+                {groupedItems['📦 Unassigned'] && (
+                  <SortableCategorySection
+                    key="📦 Unassigned"
+                    category="📦 Unassigned"
+                    items={groupedItems['📦 Unassigned']}
+                    onEdit={handleEdit}
+                    onDelete={handleDelete}
+                    onRenameCategory={handleRenameCategory}
+                    onDeleteCategory={handleDeleteCategory}
+                    onMergeCategory={handleMergeCategory}
+                    isUnassigned={true}
+                    selectedItems={selectedItems}
+                    onToggleSelect={handleToggleSelect}
+                    isBulkMode={isBulkMode}
+                  />
+                )}
+                {/* Show all other categories in sorted order */}
+                {sortedCategories.map(category => (
+                  <SortableCategorySection
+                    key={category}
+                    category={category}
+                    items={groupedItems[category] || []}
+                    onEdit={handleEdit}
+                    onDelete={handleDelete}
+                    onRenameCategory={handleRenameCategory}
+                    onDeleteCategory={handleDeleteCategory}
+                    onMergeCategory={handleMergeCategory}
+                    selectedItems={selectedItems}
+                    onToggleSelect={handleToggleSelect}
+                    isBulkMode={isBulkMode}
+                  />
+                ))}
+                {/* Show empty category placeholder if creating new category - make it droppable */}
+                {showNewCategoryInput && newCategoryName.trim() && !allCategories.includes(newCategoryName.trim()) && (
+                  <NewCategorySection
+                    categoryName={newCategoryName.trim()}
+                  />
+                )}
+              </div>
+            </SortableContext>
             <DragOverlay>
               {draggedItem ? (
                 <div className="bg-card border-2 border-primary rounded-lg p-3 sm:p-4 shadow-lg opacity-90 min-w-[250px] sm:min-w-[300px]">

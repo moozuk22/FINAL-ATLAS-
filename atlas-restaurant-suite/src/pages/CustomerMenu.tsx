@@ -12,26 +12,9 @@ import { trackQRScan } from '@/utils/analytics';
 import { triggerHapticFeedback, isOnline } from '@/utils/optimization';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
-import {
-  DndContext,
-  DragOverlay,
-  closestCenter,
-  PointerSensor,
-  TouchSensor,
-  useDroppable,
-  useSensor,
-  useSensors,
-  DragEndEvent,
-  DragStartEvent,
-} from '@dnd-kit/core';
-import {
-  SortableContext,
-  useSortable,
-  verticalListSortingStrategy,
-} from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
 
-const SortableMenuItemRow: React.FC<{
+// Simple menu item row without drag and drop functionality
+const MenuItemRow: React.FC<{
   item: MenuItem;
   quantity: number;
   onAdd: () => void;
@@ -39,42 +22,8 @@ const SortableMenuItemRow: React.FC<{
   disabled: boolean;
   isLoading: boolean;
 }> = ({ item, quantity, onAdd, onRemove, disabled, isLoading }) => {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id });
-
-  const style: React.CSSProperties = {
-    transform: CSS.Transform.toString(transform),
-    transition: isDragging ? 'none' : transition,
-    opacity: isDragging ? 0.6 : 1,
-  };
-
   return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      {...attributes}
-      {...listeners}
-      className={cn(
-        'relative cursor-grab active:cursor-grabbing',
-        isDragging && 'ring-2 ring-primary/30 rounded-2xl z-50 opacity-90',
-        // Prevent drag when interacting with buttons
-        '[&_button]:pointer-events-auto [&_button]:z-20 [&_button]:touch-action-manipulation'
-      )}
-      style={{
-        touchAction: 'none', // Enable drag on touch devices
-        WebkitTouchCallout: 'none', // Disable iOS callout
-        WebkitUserSelect: 'none', // Disable text selection
-        userSelect: 'none',
-      }}
-      onTouchStart={(e) => {
-        // Allow drag on touch devices - buttons will still work due to pointer-events-auto
-        const target = e.target as HTMLElement;
-        if (target.closest('button') || target.closest('input')) {
-          // Don't prevent default for buttons and inputs
-          return;
-        }
-        // Enable drag for the element itself
-      }}
-    >
+    <div className="relative">
       <MenuItemCard
         id={item.id}
         name={item.name}
@@ -141,6 +90,8 @@ const CustomerMenu: React.FC = () => {
   const {
     menuItems,
     getDailyMenuItems,
+    getCategoryOrder,
+    getItemOrder,
     getTableSession,
     addToCart,
     updateCartQuantity,
@@ -167,8 +118,8 @@ const CustomerMenu: React.FC = () => {
   const [pendingItems, setPendingItems] = useState<Array<{ id: string; name: string; price: number; quantity: number }>>([]);
   const [dailyMenuItems, setDailyMenuItems] = useState<MenuItem[]>([]);
   const [dailyMenuLoading, setDailyMenuLoading] = useState(false);
-  const [dailyCategoryOrder, setDailyCategoryOrder] = useState<Record<string, string[]>>({});
-  const [activeMenuDragId, setActiveMenuDragId] = useState<string | null>(null);
+  const [categoryOrder, setCategoryOrder] = useState<string[]>([]);
+  const [itemOrders, setItemOrders] = useState<Record<string, string[]>>({});
   
   // Check if menu should be hidden (after 15:00) - DISABLED FOR NOW
   const isMenuHidden = false; // Toggle back: useMemo(() => { const hour = new Date().getHours(); return hour >= 15; }, []);
@@ -189,20 +140,136 @@ const CustomerMenu: React.FC = () => {
       const items = await getDailyMenuItems();
       if (!mounted) return;
       setDailyMenuItems(items);
-      // Initialize per-category order (display only)
-      const order: Record<string, string[]> = {};
-      items.forEach((it) => {
-        const category = it.cat && it.cat.trim() ? it.cat.trim() : '📦 Други';
-        if (!order[category]) order[category] = [];
-        order[category].push(it.id);
-      });
-      setDailyCategoryOrder(order);
       setDailyMenuLoading(false);
     })();
     return () => {
       mounted = false;
     };
   }, [getDailyMenuItems]);
+
+  // Load category order on mount
+  useEffect(() => {
+    const loadCategoryOrder = async () => {
+      try {
+        const order = await getCategoryOrder();
+        if (order.length > 0) {
+          setCategoryOrder(order);
+        } else {
+          // Fallback to localStorage
+          const savedOrder = localStorage.getItem('menuCategoryOrder');
+          if (savedOrder) {
+            try {
+              setCategoryOrder(JSON.parse(savedOrder));
+            } catch (e) {
+              console.error('Error parsing category order:', e);
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Error loading category order:', e);
+        // Fallback to localStorage
+        const savedOrder = localStorage.getItem('menuCategoryOrder');
+        if (savedOrder) {
+          try {
+            setCategoryOrder(JSON.parse(savedOrder));
+          } catch (e2) {
+            console.error('Error parsing category order from localStorage:', e2);
+          }
+        }
+      }
+    };
+    loadCategoryOrder();
+  }, [getCategoryOrder]);
+
+  // Real-time subscription for category order changes
+  useEffect(() => {
+    const categoryOrderSubscription = supabase
+      .channel('customer_menu_category_order_realtime')
+      .on('postgres_changes',
+        { 
+          event: '*',
+          schema: 'public', 
+          table: 'menu_settings',
+          filter: 'key=eq.category_order'
+        },
+        async (payload) => {
+          console.log('📅 CustomerMenu: Real-time category order change:', payload.eventType);
+          try {
+            if (payload.new && payload.new.value) {
+              const order = JSON.parse(payload.new.value);
+              setCategoryOrder(order);
+              // Also update localStorage as backup
+              localStorage.setItem('menuCategoryOrder', JSON.stringify(order));
+            } else if (payload.old) {
+              // If deleted, fallback to localStorage
+              const savedOrder = localStorage.getItem('menuCategoryOrder');
+              if (savedOrder) {
+                try {
+                  setCategoryOrder(JSON.parse(savedOrder));
+                } catch (e) {
+                  console.error('Error parsing category order from localStorage:', e);
+                }
+              }
+            }
+          } catch (error) {
+            console.error('Error processing category order update:', error);
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.log('📡 CustomerMenu category order subscription status:', status);
+      });
+
+    return () => {
+      supabase.removeChannel(categoryOrderSubscription);
+    };
+  }, []);
+
+  // Real-time subscription for item order changes
+  useEffect(() => {
+    const itemOrderSubscription = supabase
+      .channel('customer_menu_item_order_realtime')
+      .on('postgres_changes',
+        { 
+          event: '*',
+          schema: 'public', 
+          table: 'menu_settings',
+          filter: 'key=like.item_order_%'
+        },
+        async (payload) => {
+          console.log('📅 CustomerMenu: Real-time item order change:', payload.eventType);
+          try {
+            if (payload.new && payload.new.value && payload.new.key) {
+              const category = payload.new.key.replace('item_order_', '');
+              const order = JSON.parse(payload.new.value);
+              setItemOrders(prev => ({ ...prev, [category]: order }));
+              // Also update localStorage as backup
+              localStorage.setItem(`menuItemOrder_${category}`, JSON.stringify(order));
+            } else if (payload.old && payload.old.key) {
+              // If deleted, fallback to localStorage
+              const category = payload.old.key.replace('item_order_', '');
+              const savedOrder = localStorage.getItem(`menuItemOrder_${category}`);
+              if (savedOrder) {
+                try {
+                  setItemOrders(prev => ({ ...prev, [category]: JSON.parse(savedOrder) }));
+                } catch (e) {
+                  console.error('Error parsing item order from localStorage:', e);
+                }
+              }
+            }
+          } catch (error) {
+            console.error('Error processing item order update:', error);
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.log('📡 CustomerMenu item order subscription status:', status);
+      });
+
+    return () => {
+      supabase.removeChannel(itemOrderSubscription);
+    };
+  }, []);
 
   // Real-time subscription for daily_menu_assignments changes
   // Reload daily menu when changes occur (real-time page reload)
@@ -211,14 +278,6 @@ const CustomerMenu: React.FC = () => {
       setDailyMenuLoading(true);
       const items = await getDailyMenuItems();
       setDailyMenuItems(items);
-      // Update category order
-      const order: Record<string, string[]> = {};
-      items.forEach((it) => {
-        const category = it.cat && it.cat.trim() ? it.cat.trim() : '📦 Други';
-        if (!order[category]) order[category] = [];
-        order[category].push(it.id);
-      });
-      setDailyCategoryOrder(order);
       setDailyMenuLoading(false);
     };
 
@@ -244,21 +303,7 @@ const CustomerMenu: React.FC = () => {
     };
   }, [getDailyMenuItems]);
 
-  const dndSensors = useSensors(
-    useSensor(PointerSensor, {
-      // Prevent accidental drags when tapping +/- or scrolling
-      activationConstraint: { distance: 8 },
-    }),
-    useSensor(TouchSensor, {
-      // Optimized for mobile: very low activation distance for immediate drag
-      activationConstraint: { 
-        distance: 0.1, // Almost immediate drag activation on touch devices
-        delay: 0, // No delay for immediate response
-        tolerance: 0 // No tolerance - immediate activation
-      },
-    })
-  );
-  
+
   // Use useMemo to ensure session updates when tables change from real-time subscriptions
   // Include realtimeUpdateVersion to force re-render on real-time updates
   const session = useMemo(() => {
@@ -488,9 +533,54 @@ const CustomerMenu: React.FC = () => {
     return items;
   }, [session.requests, pendingItems, menuItems, realtimeUpdateVersion]); // Include realtimeUpdateVersion to force re-render
 
-  // Group menu items by category - memoized with proper dependency
+  // Load item orders for all categories when dailyMenuItems change
+  useEffect(() => {
+    const loadItemOrders = async () => {
+      const categories = new Set<string>();
+      dailyMenuItems.forEach(item => {
+        const category = item.cat && item.cat.trim() ? item.cat.trim() : '📦 Други';
+        categories.add(category);
+      });
+
+      const orders: Record<string, string[]> = {};
+      for (const category of categories) {
+        try {
+          const order = await getItemOrder(category);
+          if (order.length > 0) {
+            orders[category] = order;
+          } else {
+            // Fallback to localStorage
+            const savedOrder = localStorage.getItem(`menuItemOrder_${category}`);
+            if (savedOrder) {
+              try {
+                orders[category] = JSON.parse(savedOrder);
+              } catch (e) {
+                // Ignore
+              }
+            }
+          }
+        } catch (e) {
+          // Fallback to localStorage
+          const savedOrder = localStorage.getItem(`menuItemOrder_${category}`);
+          if (savedOrder) {
+            try {
+              orders[category] = JSON.parse(savedOrder);
+            } catch (e2) {
+              // Ignore
+            }
+          }
+        }
+      }
+      setItemOrders(orders);
+    };
+    if (dailyMenuItems.length > 0) {
+      loadItemOrders();
+    }
+  }, [dailyMenuItems, getItemOrder]);
+
+  // Group menu items by category - apply saved order from database
   const groupedItems = useMemo(() => {
-    return dailyMenuItems.reduce((acc, item) => {
+    const grouped = dailyMenuItems.reduce((acc, item) => {
       // Handle empty or undefined categories
       const category = item.cat && item.cat.trim() 
         ? item.cat.trim() 
@@ -502,33 +592,70 @@ const CustomerMenu: React.FC = () => {
       acc[category].push(item);
       return acc;
     }, {} as Record<string, MenuItem[]>);
-  }, [dailyMenuItems, realtimeUpdateVersion]); // Include realtimeUpdateVersion to force re-render
 
-  const dailyItemsById = useMemo(() => {
-    return new Map(dailyMenuItems.map((i) => [i.id, i] as const));
-  }, [dailyMenuItems, realtimeUpdateVersion]); // Include realtimeUpdateVersion to force re-render
+    // Apply saved order for each category
+    Object.keys(grouped).forEach(category => {
+      const itemIds = itemOrders[category];
+      if (itemIds && itemIds.length > 0) {
+        try {
+          const itemsById = new Map(grouped[category].map(item => [item.id, item]));
+          const orderedItems: MenuItem[] = [];
+          const unorderedItems: MenuItem[] = [];
 
-  const cartDrop = useDroppable({ id: 'cart_drop' });
-  const drawerDrop = useDroppable({ id: 'cart_drawer_drop' });
-  const activeDraggedMenuItem = useMemo(() => {
-    if (!activeMenuDragId) return null;
-    return dailyItemsById.get(activeMenuDragId) || null;
-  }, [activeMenuDragId, dailyItemsById]);
+          // Add items in saved order
+          itemIds.forEach(id => {
+            const item = itemsById.get(id);
+            if (item) {
+              orderedItems.push(item);
+              itemsById.delete(id);
+            }
+          });
 
-  // Filter out empty categories and sort them
+          // Add any new items that weren't in the saved order (preserve insertion order)
+          itemsById.forEach(item => {
+            unorderedItems.push(item);
+          });
+
+          grouped[category] = [...orderedItems, ...unorderedItems];
+        } catch (e) {
+          console.error(`Error applying item order for ${category}:`, e);
+        }
+      }
+    });
+
+    return grouped;
+  }, [dailyMenuItems, itemOrders, realtimeUpdateVersion]); // Include itemOrders and realtimeUpdateVersion to force re-render
+
+
+
+  // Filter out empty categories and sort them - use same order as MenuEditor
   // Include realtimeUpdateVersion to force re-render on real-time updates
   const sortedCategories = useMemo(() => {
-    return Object.entries(groupedItems)
-      .filter(([_, items]) => items.length > 0)
-      .sort(([a], [b]) => {
-        // Sort categories: emoji categories first, then alphabetically
+    const categories = Object.keys(groupedItems).filter(cat => groupedItems[cat].length > 0);
+    const order = categoryOrder || [];
+    
+    if (!Array.isArray(order) || order.length === 0) {
+      // Default: emoji categories first, then alphabetically
+      return categories.sort((a, b) => {
         const aHasEmoji = /^[\p{Emoji}]/u.test(a);
         const bHasEmoji = /^[\p{Emoji}]/u.test(b);
         if (aHasEmoji && !bHasEmoji) return -1;
         if (!aHasEmoji && bHasEmoji) return 1;
         return a.localeCompare(b);
       });
-  }, [groupedItems, realtimeUpdateVersion]); // Include realtimeUpdateVersion to force re-render
+    }
+    
+    // Sort by saved order, then alphabetically for new categories
+    const ordered = order.filter(cat => categories.includes(cat));
+    const unordered = categories.filter(cat => !order.includes(cat)).sort((a, b) => {
+      const aHasEmoji = /^[\p{Emoji}]/u.test(a);
+      const bHasEmoji = /^[\p{Emoji}]/u.test(b);
+      if (aHasEmoji && !bHasEmoji) return -1;
+      if (!aHasEmoji && bHasEmoji) return 1;
+      return a.localeCompare(b);
+    });
+    return [...ordered, ...unordered];
+  }, [groupedItems, categoryOrder, realtimeUpdateVersion]); // Include categoryOrder and realtimeUpdateVersion to force re-render
 
   // Create a map of item quantities for faster lookup
   // Only use pending items (cart items are only added when order is submitted)
@@ -808,65 +935,7 @@ const CustomerMenu: React.FC = () => {
   // This allows customers to see their orders even when locked
 
   return (
-    <DndContext
-      sensors={dndSensors}
-      collisionDetection={closestCenter}
-      onDragStart={(event: DragStartEvent) => {
-        setActiveMenuDragId(String(event.active.id));
-      }}
-      onDragEnd={(event: DragEndEvent) => {
-        const { active, over } = event;
-        setActiveMenuDragId(null);
-        if (!over) return;
-
-        // Drop onto cart badge OR cart drawer => add to pending items (+1) and open drawer
-        if (String(over.id) === 'cart_drop' || String(over.id) === 'cart_drawer_drop') {
-          const draggedItem = dailyItemsById.get(String(active.id));
-          if (!draggedItem) return;
-          setPendingItems((prev) => {
-            const existing = prev.find((p) => p.id === draggedItem.id);
-            if (existing) {
-              return prev.map((p) =>
-                p.id === draggedItem.id ? { ...p, quantity: p.quantity + 1 } : p
-              );
-            }
-            return [
-              ...prev,
-              { id: draggedItem.id, name: draggedItem.name, price: draggedItem.price, quantity: 1 },
-            ];
-          });
-          setCartDrawerOpen(true);
-          triggerHapticFeedback('medium');
-          toast({
-            title: '✅ Добавено в кошницата',
-            description: `${draggedItem.name} е добавен(о) в кошницата.`,
-            duration: 2000,
-          });
-          return;
-        }
-
-        // Otherwise: reorder inside same category (visual only)
-        if (active.id === over.id) return;
-        const activeItem = dailyItemsById.get(String(active.id));
-        const overItem = dailyItemsById.get(String(over.id));
-        if (!activeItem || !overItem) return;
-
-        const categoryKey = (activeItem.cat && activeItem.cat.trim()) ? activeItem.cat.trim() : '📦 Други';
-        const overCategoryKey = (overItem.cat && overItem.cat.trim()) ? overItem.cat.trim() : '📦 Други';
-        if (categoryKey !== overCategoryKey) return;
-
-        setDailyCategoryOrder((prev) => {
-          const current = prev[categoryKey] || groupedItems[categoryKey]?.map((i) => i.id) || [];
-          const oldIndex = current.indexOf(String(active.id));
-          const newIndex = current.indexOf(String(over.id));
-          if (oldIndex === -1 || newIndex === -1) return prev;
-          const next = [...current];
-          const [moved] = next.splice(oldIndex, 1);
-          next.splice(newIndex, 0, moved);
-          return { ...prev, [categoryKey]: next };
-        });
-      }}
-    >
+    <>
       <div className="min-h-screen pb-24 sm:pb-28 md:pb-32" style={{ paddingBottom: 'max(6rem, env(safe-area-inset-bottom))' }}>
         {/* Header - Luxury Design */}
         <header className="sticky top-0 z-40 bg-background/95 backdrop-blur-xl border-b border-border/40 shadow-sm" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
@@ -901,11 +970,7 @@ const CustomerMenu: React.FC = () => {
               {!session.isLocked && (
                 <div>
                 <div 
-                  ref={cartDrop.setNodeRef}
-                  className={cn(
-                      "flex items-center gap-1.5 sm:gap-2 p-2 sm:p-2.5 md:p-3 bg-gradient-to-br from-card/80 to-card/60 border border-border/40 rounded-xl transition-all touch-manipulation flex-shrink-0 min-w-[120px] sm:min-w-[140px] md:min-w-[160px] shadow-md cursor-pointer hover:from-card hover:to-primary/5 hover:border-primary/50",
-                    cartDrop.isOver && "border-primary/70 ring-2 ring-primary/30 from-primary/10 to-primary/5"
-                  )}
+                  className="flex items-center gap-1.5 sm:gap-2 p-2 sm:p-2.5 md:p-3 bg-gradient-to-br from-card/80 to-card/60 border border-border/40 rounded-xl transition-all touch-manipulation flex-shrink-0 min-w-[120px] sm:min-w-[140px] md:min-w-[160px] shadow-md cursor-pointer hover:from-card hover:to-primary/5 hover:border-primary/50"
                   onClick={() => setCartDrawerOpen(true)}
                 >
                     <div className="h-5 w-5 sm:h-6 sm:w-6 rounded-lg bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center flex-shrink-0 shadow-sm">
@@ -966,7 +1031,8 @@ const CustomerMenu: React.FC = () => {
             </div>
           ) : (
           <div className="space-y-6 sm:space-y-8 md:space-y-10 stagger-children">
-            {sortedCategories.map(([category, items]) => {
+            {sortedCategories.map((category) => {
+              const items = groupedItems[category] || [];
             // Extract emoji from category name
             const categoryEmoji = category.match(/^[\p{Emoji}]/u)?.[0] || '🍽️';
             const categoryName = category.replace(/^[\p{Emoji}]\s*/, '') || category;
@@ -991,40 +1057,24 @@ const CustomerMenu: React.FC = () => {
                 </div>
                 
                 {/* Menu Items - Luxury Style */}
-                <SortableContext
-                  items={(dailyCategoryOrder[category] || items.map((i) => i.id))}
-                  strategy={verticalListSortingStrategy}
-                >
-                  <div className="space-y-1 sm:space-y-1.5">
-                    {(dailyCategoryOrder[category] || items.map((i) => i.id))
-                      .map((id) => dailyItemsById.get(id))
-                      .filter(Boolean)
-                      .map((item) => (
-                        <SortableMenuItemRow
-                          key={item!.id}
-                          item={item!}
-                          quantity={getItemQuantity(item!.id)}
-                          onAdd={() => handleAddItem(item!)}
-                          onRemove={() => handleRemoveItem(item!.id)}
-                          disabled={false}
-                          isLoading={loadingItems.has(item!.id)}
-                  />
-                ))}
-              </div>
-                </SortableContext>
+                <div className="space-y-1 sm:space-y-1.5">
+                  {items.map((item) => (
+                    <MenuItemRow
+                      key={item.id}
+                      item={item}
+                      quantity={getItemQuantity(item.id)}
+                      onAdd={() => handleAddItem(item)}
+                      onRemove={() => handleRemoveItem(item.id)}
+                      disabled={false}
+                      isLoading={loadingItems.has(item.id)}
+                    />
+                  ))}
+                </div>
             </section>
             );
           })}
         </div>
           )}
-        <DragOverlay>
-          {activeDraggedMenuItem ? (
-            <div className="bg-card border border-primary/50 rounded-lg p-3 shadow-lg opacity-95">
-              <div className="font-semibold text-sm">{activeDraggedMenuItem.name}</div>
-              <div className="text-xs text-muted-foreground">{activeDraggedMenuItem.price.toFixed(2)} EUR</div>
-            </div>
-          ) : null}
-        </DragOverlay>
       </main>
 
       {/* Fixed Bottom Actions - Luxury Design */}
@@ -1153,8 +1203,6 @@ const CustomerMenu: React.FC = () => {
                 }
               : undefined
           }
-        menuDropRef={drawerDrop.setNodeRef}
-        menuDropIsOver={drawerDrop.isOver}
       />
       )}
 
@@ -1174,7 +1222,7 @@ const CustomerMenu: React.FC = () => {
         googlePlaceId={import.meta.env.VITE_GOOGLE_PLACE_ID}
       />
     </div>
-    </DndContext>
+    </>
   );
 };
 

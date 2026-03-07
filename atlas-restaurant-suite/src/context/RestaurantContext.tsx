@@ -121,6 +121,12 @@ interface RestaurantContextType {
   getDailyMenuItems: (date?: string) => Promise<MenuItem[]>;
   setDailyMenuItems: (date: string, itemIds: string[]) => Promise<void>;
   toggleDailyMenuItemVisibility: (itemId: string, date: string, isVisible: boolean) => Promise<void>;
+  // Category order
+  getCategoryOrder: () => Promise<string[]>;
+  setCategoryOrder: (order: string[]) => Promise<void>;
+  // Item order per category
+  getItemOrder: (category: string) => Promise<string[]>;
+  setItemOrder: (category: string, itemIds: string[]) => Promise<void>;
   // Ratings
   submitRating: (tableId: string, rating: number, feedback?: string) => Promise<void>;
   // Reports
@@ -189,20 +195,22 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   // Ref to store instant new order callback (0ms detection)
   const onNewOrderCallbackRef = useRef<((requestType: string, tableId: string) => void) | null>(null);
   
-  // BroadcastChannel for instant cross-tab/cross-window communication (0ms, no database)
-  const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
+  // Cross-tab broadcast for instant cross-tab/cross-window communication (0ms, no database)
+  // Compatible with all devices (uses BroadcastChannel when available, localStorage fallback otherwise)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const broadcastRef = useRef<any>(null); // CrossTabBroadcast instance
   
-  // Initialize BroadcastChannel for instant frontend-to-frontend updates
+  // Initialize cross-tab broadcast for instant frontend-to-frontend updates
   useEffect(() => {
-    // Create broadcast channel for instant updates across all browser tabs/windows
-    const channel = new BroadcastChannel('atlas-restaurant-updates');
-    broadcastChannelRef.current = channel;
-    
-    // Listen for updates from other tabs/windows
-    channel.onmessage = (event) => {
-      const { type, payload, timestamp } = event.data;
-      const receiveTime = performance.now();
-      console.log(`📡 BroadcastChannel received: ${type} (latency: ${Date.now() - timestamp}ms)`);
+    // Import and initialize cross-tab broadcast (works on all devices)
+    import('../utils/crossTabBroadcast').then(({ getCrossTabBroadcast }) => {
+      const broadcast = getCrossTabBroadcast();
+      broadcastRef.current = broadcast;
+      
+      // Subscribe to messages from other tabs/windows
+      const unsubscribe = broadcast.onMessage((message) => {
+        const { type, payload, timestamp } = message;
+        console.log(`📡 Cross-tab broadcast received: ${type} (latency: ${Date.now() - timestamp}ms)`);
       
       if (type === 'NEW_REQUEST') {
         // Instantly update local state with the new request (0ms, no database)
@@ -231,7 +239,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               ...updated[tableId],
               requests: [...updated[tableId].requests, request],
             };
-            console.log(`⚡ INSTANT UPDATE (0ms): Added ${request.requestType} to ${tableId} via BroadcastChannel`);
+            console.log(`⚡ INSTANT UPDATE (0ms): Added ${request.requestType} to ${tableId} via cross-tab broadcast`);
           }
           
           return updated;
@@ -259,7 +267,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         if (onNewOrderCallbackRef.current && request.status === 'pending') {
           try {
             onNewOrderCallbackRef.current(request.requestType || 'unknown', tableId);
-            console.log(`🔊 Instant feedback triggered via BroadcastChannel`);
+            console.log(`🔊 Instant feedback triggered via cross-tab broadcast`);
           } catch (error) {
             console.error('Error in instant feedback callback:', error);
           }
@@ -282,7 +290,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         });
         
         setRealtimeUpdateVersion(prev => prev + 1);
-        console.log(`⚡ INSTANT UPDATE (0ms): Updated ${requestId} in ${tableId} via BroadcastChannel`);
+        console.log(`⚡ INSTANT UPDATE (0ms): Updated ${requestId} in ${tableId} via cross-tab broadcast`);
       } else if (type === 'TABLE_CLEARED') {
         // Instantly clear table (0ms, no database)
         const { tableId } = payload;
@@ -301,7 +309,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         });
         
         setRealtimeUpdateVersion(prev => prev + 1);
-        console.log(`⚡ INSTANT UPDATE (0ms): Cleared ${tableId} via BroadcastChannel`);
+        console.log(`⚡ INSTANT UPDATE (0ms): Cleared ${tableId} via cross-tab broadcast`);
       } else if (type === 'CART_UPDATED') {
         // Instantly update cart (0ms, no database)
         const { tableId, cart } = payload;
@@ -328,7 +336,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           return [...prev, item];
         });
         
-        console.log(`⚡ INSTANT UPDATE (0ms): Menu item added via BroadcastChannel - ${item.name}`);
+        console.log(`⚡ INSTANT UPDATE (0ms): Menu item added via cross-tab broadcast - ${item.name}`);
       } else if (type === 'MENU_ITEM_UPDATED') {
         // Instantly update menu item (0ms, no database)
         const { id, updates } = payload;
@@ -337,41 +345,48 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           item.id === id ? { ...item, ...updates } : item
         ));
         
-        console.log(`⚡ INSTANT UPDATE (0ms): Menu item updated via BroadcastChannel - ID: ${id}`);
+        console.log(`⚡ INSTANT UPDATE (0ms): Menu item updated via cross-tab broadcast - ID: ${id}`);
       } else if (type === 'MENU_ITEM_DELETED') {
         // Instantly delete menu item (0ms, no database)
         const { id } = payload;
         
         setMenuItems(prev => prev.filter(item => item.id !== id));
         
-        console.log(`⚡ INSTANT UPDATE (0ms): Menu item deleted via BroadcastChannel - ID: ${id}`);
+        console.log(`⚡ INSTANT UPDATE (0ms): Menu item deleted via cross-tab broadcast - ID: ${id}`);
       } else if (type === 'DAILY_MENU_UPDATED') {
         // Instantly update daily menu (0ms, no database)
         // This triggers a re-render for components watching menuItems
         setRealtimeUpdateVersion(prev => prev + 1);
         
-        console.log(`⚡ INSTANT UPDATE (0ms): Daily menu updated via BroadcastChannel`);
+        console.log(`⚡ INSTANT UPDATE (0ms): Daily menu updated via cross-tab broadcast`);
       }
-    };
-    
-    console.log('📡 BroadcastChannel initialized for instant frontend-to-frontend updates');
-    
-    return () => {
-      channel.close();
-      broadcastChannelRef.current = null;
-      console.log('📡 BroadcastChannel closed');
-    };
+      });
+      
+      console.log('📡 Cross-tab broadcast initialized for instant frontend-to-frontend updates (compatible with all devices)');
+      
+      // Cleanup function
+      return () => {
+        unsubscribe();
+        // Note: We don't close the singleton instance here as other components might be using it
+        broadcastRef.current = null;
+        console.log('📡 Cross-tab broadcast unsubscribed');
+      };
+    });
   }, []);
   
   // Helper function to broadcast updates to all tabs/windows (0ms)
   const broadcastUpdate = useCallback((type: string, payload: any) => {
-    if (broadcastChannelRef.current) {
-      broadcastChannelRef.current.postMessage({
-        type,
-        payload,
-        timestamp: Date.now(),
+    if (broadcastRef.current) {
+      broadcastRef.current.postMessage(type, payload);
+    } else {
+      // Fallback: try to get the broadcast instance
+      import('../utils/crossTabBroadcast').then(({ getCrossTabBroadcast }) => {
+        const broadcast = getCrossTabBroadcast();
+        broadcastRef.current = broadcast;
+        broadcast.postMessage(type, payload);
+      }).catch(error => {
+        console.error('Error initializing cross-tab broadcast:', error);
       });
-      console.log(`📡 BroadcastChannel sent: ${type}`);
     }
   }, []);
   
@@ -432,7 +447,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     try {
       // Only show loading spinner if not silent (for initial load or manual refresh)
       if (!silent) {
-        setLoading(true);
+      setLoading(true);
       }
       
       // OPTIMIZATION: Only cleanup completed requests periodically (every 5 minutes)
@@ -483,7 +498,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         // Fallback to default tables
         setTables(defaultTables);
         if (!silent) {
-          setLoading(false);
+        setLoading(false);
         }
         return;
       }
@@ -598,30 +613,30 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       const hasChanges = currentTablesJson !== newTablesJson;
       
       if (hasChanges) {
-        // #region agent log
-        const tableKeys = Object.keys(newTables);
-        const tableCounts = tableKeys.map(k => ({tableId:k,requests:newTables[k].requests.length,cart:newTables[k].cart.length}));
-        fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:386',message:'setTables called with new data',data:{tableCount:tableKeys.length,tableCounts,newTablesRef:Object.keys(newTables).join(','),sessionsRef:Object.keys(sessions).join(',')},timestamp:Date.now(),runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-        // #endregion
-        setTables(newTables);
+      // #region agent log
+      const tableKeys = Object.keys(newTables);
+      const tableCounts = tableKeys.map(k => ({tableId:k,requests:newTables[k].requests.length,cart:newTables[k].cart.length}));
+      fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:386',message:'setTables called with new data',data:{tableCount:tableKeys.length,tableCounts,newTablesRef:Object.keys(newTables).join(','),sessionsRef:Object.keys(sessions).join(',')},timestamp:Date.now(),runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
+      setTables(newTables);
         // Update ref with new tables
         tablesRef.current = newTables;
-        // Increment version AFTER setTables to force re-render of all components
-        setRealtimeUpdateVersion(prev => {
-          const newVersion = prev + 1;
-          console.log(`🔄 Real-time update version incremented: ${prev} → ${newVersion} (tables updated)`);
-          // #region agent log
-          fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:392',message:'realtimeUpdateVersion incremented',data:{prev,newVersion},timestamp:Date.now(),runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-          // #endregion
-          return newVersion;
-        });
+      // Increment version AFTER setTables to force re-render of all components
+      setRealtimeUpdateVersion(prev => {
+        const newVersion = prev + 1;
+        console.log(`🔄 Real-time update version incremented: ${prev} → ${newVersion} (tables updated)`);
+        // #region agent log
+        fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:392',message:'realtimeUpdateVersion incremented',data:{prev,newVersion},timestamp:Date.now(),runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+        // #endregion
+        return newVersion;
+      });
       } else if (!silent) {
         // Only log if not silent and no changes (for debugging)
         console.log('ℹ️ No changes detected, skipping state update');
       }
       
       if (!silent) {
-        setLoading(false);
+      setLoading(false);
       }
     } catch (error) {
       console.error('Error loading table sessions:', error);
@@ -631,7 +646,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       // Increment version even on error to trigger re-render
       setRealtimeUpdateVersion(prev => prev + 1);
       if (!silent) {
-        setLoading(false);
+      setLoading(false);
       }
     }
   }, [lastCleanup, paidTables]); // paidTables is used in filter
@@ -757,18 +772,18 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       const setupTime = performance.now();
       addSubscriptionLog('cart', 'SUBSCRIBED', 'Setting up cart subscription');
       return supabase
-        .channel('cart_changes')
-        .on('postgres_changes', 
-          { event: '*', schema: 'public', table: 'cart_items' },
-          (payload) => {
+      .channel('cart_changes')
+      .on('postgres_changes', 
+        { event: '*', schema: 'public', table: 'cart_items' },
+        (payload) => {
             const eventTime = performance.now();
             const timeSinceSetup = (eventTime - setupTime).toFixed(2);
             console.log(`🛒 Real-time cart_items change (${timeSinceSetup}ms after setup):`, payload.eventType, payload);
             addSubscriptionLog('cart', 'EVENT', `${payload.eventType} - table_id: ${payload.new?.table_id || payload.old?.table_id || 'unknown'}`);
-            // #region agent log
-            fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:430',message:'Cart subscription callback fired',data:{eventType:payload.eventType,hasNew:!!payload.new,hasOld:!!payload.old},timestamp:Date.now(),runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-            // #endregion
-            // Immediate reload for instant cart updates
+          // #region agent log
+          fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:430',message:'Cart subscription callback fired',data:{eventType:payload.eventType,hasNew:!!payload.new,hasOld:!!payload.old},timestamp:Date.now(),runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+          // #endregion
+          // Immediate reload for instant cart updates
             reloadData('cart subscription');
           }
         );
@@ -781,9 +796,9 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       console.log(`📡 Cart subscription status: ${status} (took ${subscribeTime.toFixed(2)}ms to subscribe)`);
       subscriptionStatuses.cart = status as any;
       addSubscriptionLog('cart', status === 'SUBSCRIBED' ? 'SUBSCRIBED' : 'ERROR', `Status: ${status} (${subscribeTime.toFixed(2)}ms)`);
-      // #region agent log
-      fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:436',message:'Cart subscription status changed',data:{status},timestamp:Date.now(),runId:'run1',hypothesisId:'I'})}).catch(()=>{});
-      // #endregion
+        // #region agent log
+        fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:436',message:'Cart subscription status changed',data:{status},timestamp:Date.now(),runId:'run1',hypothesisId:'I'})}).catch(()=>{});
+        // #endregion
       
       if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
         addSubscriptionLog('cart', 'ERROR', `Connection failed: ${status}`);
@@ -796,28 +811,28 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       const setupTime = performance.now();
       addSubscriptionLog('requests', 'SUBSCRIBED', 'Setting up requests subscription');
       return supabase
-        .channel('requests_changes')
-        .on('postgres_changes',
-          { 
-            event: '*', // Listen to INSERT, UPDATE, DELETE
-            schema: 'public', 
-            table: 'table_requests' 
-          },
-          (payload) => {
+      .channel('requests_changes')
+      .on('postgres_changes',
+        { 
+          event: '*', // Listen to INSERT, UPDATE, DELETE
+          schema: 'public', 
+          table: 'table_requests' 
+        },
+        (payload) => {
             const eventTime = performance.now();
             const timeSinceSetup = (eventTime - setupTime).toFixed(2);
             const requestType = payload.new?.request_type || payload.old?.request_type;
             const tableId = payload.new?.table_id || payload.old?.table_id || 'unknown';
             console.log(`🔔 Real-time table_requests change (${timeSinceSetup}ms after setup):`, payload.eventType, `type: ${requestType}, table: ${tableId}`);
             addSubscriptionLog('requests', 'EVENT', `${payload.eventType} - type: ${requestType}, table: ${tableId}`);
-            // #region agent log
-            fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:448',message:'Requests subscription callback fired',data:{eventType:payload.eventType,hasNew:!!payload.new,hasOld:!!payload.old,requestType:payload.new?.request_type||payload.old?.request_type},timestamp:Date.now(),runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-            // #endregion
-            
-            // Check if this is an animator request
-            const isAnimatorRequest = requestType === 'animator';
-            
-            if (payload.eventType === 'INSERT') {
+          // #region agent log
+          fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:448',message:'Requests subscription callback fired',data:{eventType:payload.eventType,hasNew:!!payload.new,hasOld:!!payload.old,requestType:payload.new?.request_type||payload.old?.request_type},timestamp:Date.now(),runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+          // #endregion
+          
+          // Check if this is an animator request
+          const isAnimatorRequest = requestType === 'animator';
+          
+          if (payload.eventType === 'INSERT') {
               const eventStartTime = performance.now();
               const realRequestId = payload.new?.id;
               const insertTableId = payload.new?.table_id || 'unknown';
@@ -903,13 +918,13 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               
               const totalTime = performance.now() - eventStartTime;
               console.log(`⏱️ Total INSERT handling time: ${totalTime.toFixed(2)}ms`);
-            } else if (payload.eventType === 'UPDATE') {
+          } else if (payload.eventType === 'UPDATE') {
               console.log(`✅ Request updated (${requestType}) - reloading data...`);
-              // Immediate reload for all request updates (orders, bills, animator, etc.)
+            // Immediate reload for all request updates (orders, bills, animator, etc.)
               reloadData(`requests subscription - UPDATE ${requestType}`);
-            } else if (payload.eventType === 'DELETE') {
+          } else if (payload.eventType === 'DELETE') {
               console.log(`✅ Request deleted (${requestType}) - reloading data...`);
-              // Immediate reload when requests are deleted (table paid/reset, etc.)
+            // Immediate reload when requests are deleted (table paid/reset, etc.)
               reloadData(`requests subscription - DELETE ${requestType}`);
             }
           }
@@ -923,15 +938,15 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       console.log(`📡 Requests subscription status: ${status} (took ${subscribeTime.toFixed(2)}ms to subscribe)`);
       subscriptionStatuses.requests = status as any;
       addSubscriptionLog('requests', status === 'SUBSCRIBED' ? 'SUBSCRIBED' : 'ERROR', `Status: ${status} (${subscribeTime.toFixed(2)}ms)`);
-      // #region agent log
-      fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:495',message:'Requests subscription status changed',data:{status},timestamp:Date.now(),runId:'run1',hypothesisId:'I'})}).catch(()=>{});
-      // #endregion
+        // #region agent log
+        fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:495',message:'Requests subscription status changed',data:{status},timestamp:Date.now(),runId:'run1',hypothesisId:'I'})}).catch(()=>{});
+        // #endregion
       
       if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
         addSubscriptionLog('requests', 'ERROR', `Connection failed: ${status}`);
         handleSubscriptionError('requests', requestsSubscription, setupRequestsSubscription);
       }
-    });
+      });
 
     // OPTIMIZATION: Selective real-time updates - only update changed items
     // This avoids full reloads and improves performance significantly
@@ -939,51 +954,51 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       const setupTime = performance.now();
       addSubscriptionLog('menu', 'SUBSCRIBED', 'Setting up menu subscription');
       return supabase
-        .channel('menu_changes')
-        .on('postgres_changes',
-          { 
-            event: '*', // Listen to INSERT, UPDATE, DELETE
-            schema: 'public', 
-            table: 'menu_items' 
-          },
-          (payload) => {
+      .channel('menu_changes')
+      .on('postgres_changes',
+        { 
+          event: '*', // Listen to INSERT, UPDATE, DELETE
+          schema: 'public', 
+          table: 'menu_items' 
+        },
+        (payload) => {
             const eventTime = performance.now();
             const timeSinceSetup = (eventTime - setupTime).toFixed(2);
             console.log(`🍽️ Real-time menu_items change (${timeSinceSetup}ms after setup):`, payload.eventType, payload);
             addSubscriptionLog('menu', 'EVENT', `${payload.eventType} - item_id: ${payload.new?.id || payload.old?.id || 'unknown'}`);
-            
-            // Force re-render on menu changes
-            setRealtimeUpdateVersion(prev => prev + 1);
-            
-            if (payload.eventType === 'INSERT' && payload.new) {
-              // Add new item without reloading all items
-              const newItem = mapMenuItem(payload.new);
-              setMenuItems(prev => {
-                // Check if item already exists (avoid duplicates)
-                if (prev.find(item => item.id === newItem.id)) {
-                  return prev;
-                }
-                return [...prev, newItem].sort((a, b) => {
-                  const catA = a.cat || '';
-                  const catB = b.cat || '';
-                  return catA.localeCompare(catB);
-                });
+          
+          // Force re-render on menu changes
+          setRealtimeUpdateVersion(prev => prev + 1);
+          
+          if (payload.eventType === 'INSERT' && payload.new) {
+            // Add new item without reloading all items
+            const newItem = mapMenuItem(payload.new);
+            setMenuItems(prev => {
+              // Check if item already exists (avoid duplicates)
+              if (prev.find(item => item.id === newItem.id)) {
+                return prev;
+              }
+              return [...prev, newItem].sort((a, b) => {
+                const catA = a.cat || '';
+                const catB = b.cat || '';
+                return catA.localeCompare(catB);
               });
-              console.log(`✅ Added menu item in real-time: ${newItem.name}`);
-            } else if (payload.eventType === 'UPDATE' && payload.new) {
-              // Update existing item without reloading all items
-              const updatedItem = mapMenuItem(payload.new);
-              setMenuItems(prev => prev.map(item => 
-                item.id === updatedItem.id ? updatedItem : item
-              ));
-              console.log(`✅ Updated menu item in real-time: ${updatedItem.name}`);
-            } else if (payload.eventType === 'DELETE' && payload.old) {
-              // Remove deleted item without reloading all items
-              const deletedId = payload.old.id;
-              setMenuItems(prev => prev.filter(item => item.id !== deletedId));
-              console.log(`✅ Deleted menu item in real-time: ${deletedId}`);
-            }
+            });
+            console.log(`✅ Added menu item in real-time: ${newItem.name}`);
+          } else if (payload.eventType === 'UPDATE' && payload.new) {
+            // Update existing item without reloading all items
+            const updatedItem = mapMenuItem(payload.new);
+            setMenuItems(prev => prev.map(item => 
+              item.id === updatedItem.id ? updatedItem : item
+            ));
+            console.log(`✅ Updated menu item in real-time: ${updatedItem.name}`);
+          } else if (payload.eventType === 'DELETE' && payload.old) {
+            // Remove deleted item without reloading all items
+            const deletedId = payload.old.id;
+            setMenuItems(prev => prev.filter(item => item.id !== deletedId));
+            console.log(`✅ Deleted menu item in real-time: ${deletedId}`);
           }
+        }
         );
     };
 
@@ -994,78 +1009,78 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       console.log(`📡 Menu subscription status: ${status} (took ${subscribeTime.toFixed(2)}ms to subscribe)`);
       subscriptionStatuses.menu = status as any;
       addSubscriptionLog('menu', status === 'SUBSCRIBED' ? 'SUBSCRIBED' : 'ERROR', `Status: ${status} (${subscribeTime.toFixed(2)}ms)`);
-      // #region agent log
-      fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:548',message:'Menu subscription status changed',data:{status},timestamp:Date.now(),runId:'run1',hypothesisId:'I'})}).catch(()=>{});
-      // #endregion
+        // #region agent log
+        fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:548',message:'Menu subscription status changed',data:{status},timestamp:Date.now(),runId:'run1',hypothesisId:'I'})}).catch(()=>{});
+        // #endregion
       
       if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
         addSubscriptionLog('menu', 'ERROR', `Connection failed: ${status}`);
         handleSubscriptionError('menu', menuSubscription, setupMenuSubscription);
       }
-    });
+      });
 
     // Real-time subscription for restaurant_tables changes
     const setupTablesSubscription = () => {
       return supabase
-        .channel('tables_changes')
-        .on('postgres_changes',
-          { 
-            event: '*', // Listen to INSERT, UPDATE, DELETE
-            schema: 'public', 
-            table: 'restaurant_tables' 
-          },
-          (payload) => {
-            console.log('🪑 Real-time restaurant_tables change:', payload.eventType, payload);
-            // Immediate reload for instant table status updates
-            reloadData();
-          }
+      .channel('tables_changes')
+      .on('postgres_changes',
+        { 
+          event: '*', // Listen to INSERT, UPDATE, DELETE
+          schema: 'public', 
+          table: 'restaurant_tables' 
+        },
+        (payload) => {
+          console.log('🪑 Real-time restaurant_tables change:', payload.eventType, payload);
+          // Immediate reload for instant table status updates
+          reloadData();
+        }
         );
     };
 
     const tablesSubscription = setupTablesSubscription();
     tablesSubscription.subscribe((status) => {
-      console.log('📡 Tables subscription status:', status);
+        console.log('📡 Tables subscription status:', status);
       subscriptionStatuses.tables = status as any;
-      // #region agent log
-      fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:567',message:'Tables subscription status changed',data:{status},timestamp:Date.now(),runId:'run1',hypothesisId:'I'})}).catch(()=>{});
-      // #endregion
+        // #region agent log
+        fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:567',message:'Tables subscription status changed',data:{status},timestamp:Date.now(),runId:'run1',hypothesisId:'I'})}).catch(()=>{});
+        // #endregion
       
       if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
         handleSubscriptionError('tables', tablesSubscription, setupTablesSubscription);
       }
-    });
+      });
 
     // Real-time subscription for daily_menu_assignments changes
     // Immediate reload for MenuEditor to see changes instantly
     const setupDailyMenuSubscription = () => {
       return supabase
-        .channel('daily_menu_changes')
-        .on('postgres_changes',
-          { 
-            event: '*', // Listen to INSERT, UPDATE, DELETE
-            schema: 'public', 
-            table: 'daily_menu_assignments' 
-          },
-          (payload) => {
-            console.log('📅 Real-time daily_menu_assignments change:', payload.eventType, payload);
-            // Immediate reload for MenuEditor to see daily menu changes instantly
-            reloadData();
-          }
+      .channel('daily_menu_changes')
+      .on('postgres_changes',
+        { 
+          event: '*', // Listen to INSERT, UPDATE, DELETE
+          schema: 'public', 
+          table: 'daily_menu_assignments' 
+        },
+        (payload) => {
+          console.log('📅 Real-time daily_menu_assignments change:', payload.eventType, payload);
+          // Immediate reload for MenuEditor to see daily menu changes instantly
+          reloadData();
+        }
         );
     };
 
     const dailyMenuSubscription = setupDailyMenuSubscription();
     dailyMenuSubscription.subscribe((status) => {
-      console.log('📡 Daily menu subscription status:', status);
+        console.log('📡 Daily menu subscription status:', status);
       subscriptionStatuses.dailyMenu = status as any;
-      // #region agent log
-      fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:587',message:'Daily menu subscription status changed',data:{status},timestamp:Date.now(),runId:'run1',hypothesisId:'I'})}).catch(()=>{});
-      // #endregion
+        // #region agent log
+        fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:587',message:'Daily menu subscription status changed',data:{status},timestamp:Date.now(),runId:'run1',hypothesisId:'I'})}).catch(()=>{});
+        // #endregion
       
       if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
         handleSubscriptionError('dailyMenu', dailyMenuSubscription, setupDailyMenuSubscription);
       }
-    });
+      });
 
     return () => {
       console.log('🧹 Cleaning up real-time subscriptions');
@@ -1504,15 +1519,15 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         .insert({
           id: realRequestId,
           table_id: tableId,
-          action: '🍽️ NEW ORDER',
+        action: '🍽️ NEW ORDER',
           details: dbOrderDetails,
           total: dbOrderTotal,
-          status: 'pending',
+        status: 'pending',
           timestamp: timestamp,
           source: source,
           request_type: 'order',
         });
-
+      
       if (insertError) {
         // ROLLBACK: Remove optimistic update on error
         console.error('❌ Database insert failed - rolling back optimistic update');
@@ -1681,10 +1696,10 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         .insert({
           id: realRequestId,
           table_id: tableId,
-          action: '🔔 WAITER CALL',
-          details: 'Customer requested assistance',
-          total: 0,
-          status: 'pending',
+        action: '🔔 WAITER CALL',
+        details: 'Customer requested assistance',
+        total: 0,
+        status: 'pending',
           timestamp: timestamp,
           source: source,
           request_type: 'waiter',
@@ -1873,10 +1888,10 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         .insert({
           id: realRequestId,
           table_id: tableId,
-          action: '💳 BILL REQUEST',
-          details: `Payment: ${paymentMethod === 'cash' ? 'Cash' : 'Card'}`,
+        action: '💳 BILL REQUEST',
+        details: `Payment: ${paymentMethod === 'cash' ? 'Cash' : 'Card'}`,
           total: dbTotalBill,
-          status: 'pending',
+        status: 'pending',
           timestamp: timestamp,
           payment_method: paymentMethod,
           source: source,
@@ -2177,24 +2192,24 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
         // Fetch requests from database
         const { data: requestsData } = await supabase
-          .from('table_requests')
-          .select('*')
-          .eq('table_id', tableId);
+        .from('table_requests')
+        .select('*')
+        .eq('table_id', tableId);
 
         // Move to completed_orders (parallel operations)
         const dbOperations = [];
 
-        if (requestsData && requestsData.length > 0) {
-          const completedOrders = requestsData.map(req => ({
-            id: req.id,
-            table_id: req.table_id,
-            action: req.action,
-            details: req.details || '',
-            total: parseFloat(req.total || '0'),
-            status: 'completed',
-            timestamp: req.timestamp,
-            payment_method: req.payment_method || null,
-          }));
+      if (requestsData && requestsData.length > 0) {
+        const completedOrders = requestsData.map(req => ({
+          id: req.id,
+          table_id: req.table_id,
+          action: req.action,
+          details: req.details || '',
+          total: parseFloat(req.total || '0'),
+          status: 'completed',
+          timestamp: req.timestamp,
+          payment_method: req.payment_method || null,
+        }));
 
           dbOperations.push(
             supabase.from('completed_orders').insert(completedOrders)
@@ -2207,16 +2222,16 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         if (originalRequests.length > 0) {
           const totalRevenue = originalRequests.reduce((sum, r) => sum + r.total, 0);
           const sessionStartTime = Math.min(...originalRequests.map(r => r.timestamp));
-          const sessionDuration = Math.floor((Date.now() - sessionStartTime) / 60000);
+        const sessionDuration = Math.floor((Date.now() - sessionStartTime) / 60000);
 
           dbOperations.push(
             supabase.from('table_history_archive').insert({
-              id: `archive_${tableId}_${Date.now()}`,
-              table_id: tableId,
+            id: `archive_${tableId}_${Date.now()}`,
+            table_id: tableId,
               cart_items: originalCart,
               requests: requestsData || originalRequests,
-              total_revenue: totalRevenue,
-              session_duration_minutes: sessionDuration,
+            total_revenue: totalRevenue,
+            session_duration_minutes: sessionDuration,
             })
               .then(() => console.log(`✅ [Background] Session archived for ${tableId}`))
               .catch(e => console.error('[Background] Error archiving session:', e))
@@ -2240,7 +2255,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         // Unlock table
         dbOperations.push(
           supabase.from('restaurant_tables').update({ 
-            is_locked: false,
+          is_locked: false,
             session_started_at: new Date().toISOString()
           }).eq('table_id', tableId)
             .then(() => console.log(`✅ [Background] Table ${tableId} unlocked`))
@@ -2251,20 +2266,20 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         await Promise.allSettled(dbOperations);
 
         // Clear paid flag after delay
-        setTimeout(() => {
-          setPaidTables(prev => {
-            const next = new Set(prev);
-            next.delete(tableId);
-            return next;
-          });
+      setTimeout(() => {
+        setPaidTables(prev => {
+          const next = new Set(prev);
+          next.delete(tableId);
+          return next;
+        });
         }, 2000);
 
         console.log(`✅ [Background] All database operations completed for ${tableId}`);
-      } catch (error) {
+    } catch (error) {
         console.error(`[Background] Error in database sync for ${tableId}:`, error);
         // Note: We don't rollback here because the UI should stay cleared
         // The database will eventually sync on next page load
-      }
+    }
     })();
 
     // Function returns immediately (0ms) - database sync happens in background
@@ -2640,7 +2655,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   // Menu management functions
   const addMenuItem = useCallback(async (item: Omit<MenuItem, 'id'>) => {
-    const newId = `item_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const newId = `item_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
     // Create new menu item object
     const newMenuItem: MenuItem = {
@@ -2879,29 +2894,29 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       console.log(`⚡ Optimistic animator request added instantly (0ms) - Temp ID: ${tempRequestId}, Table: ${tableId}`);
 
-      try {
-        // Check if there's already an active animator request for this table
-        const { data: existingRequest } = await supabase
+    try {
+      // Check if there's already an active animator request for this table
+      const { data: existingRequest } = await supabase
+        .from('table_requests')
+        .select('id, status, child_location')
+        .eq('table_id', tableId)
+        .eq('request_type', 'animator')
+        .in('status', ['pending', 'confirmed'])
+        .order('timestamp', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (existingRequest) {
+        // If there's an active request, just update the timestamp (client is calling again)
+        const { error: updateError } = await supabase
           .from('table_requests')
-          .select('id, status, child_location')
-          .eq('table_id', tableId)
-          .eq('request_type', 'animator')
-          .in('status', ['pending', 'confirmed'])
-          .order('timestamp', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        if (existingRequest) {
-          // If there's an active request, just update the timestamp (client is calling again)
-          const { error: updateError } = await supabase
-            .from('table_requests')
-            .update({
+          .update({
               timestamp: timestamp,
-              source: source,
-            })
-            .eq('id', existingRequest.id);
+            source: source,
+          })
+          .eq('id', existingRequest.id);
 
-          if (updateError) {
+        if (updateError) {
             // ROLLBACK: Remove optimistic update on error
             console.error('❌ Database update failed - rolling back optimistic update');
             setTables(prev => {
@@ -2924,8 +2939,8 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               },
             };
             
-            throw updateError;
-          }
+          throw updateError;
+        }
           
           // Replace temp ID with existing request ID
           setTables(prev => {
@@ -2953,24 +2968,24 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           };
           
           console.log(`✅ Animator request synced with database - Real ID: ${existingRequest.id}`);
-        } else {
-          // Create new request only if there's no active one
+      } else {
+        // Create new request only if there's no active one
           const realRequestId = `req_${Date.now()}`;
-          const { error: insertError } = await supabase
-            .from('table_requests')
-            .insert({
+        const { error: insertError } = await supabase
+          .from('table_requests')
+          .insert({
               id: realRequestId,
-              table_id: tableId,
-              action: '🎭 АНИМАТОР ЗА ДЕТСКИ КЪТ',
-              details: 'Заявка за аниматор',
-              total: 0,
-              status: 'pending',
+            table_id: tableId,
+            action: '🎭 АНИМАТОР ЗА ДЕТСКИ КЪТ',
+            details: 'Заявка за аниматор',
+            total: 0,
+            status: 'pending',
               timestamp: timestamp,
-              source: source,
-              request_type: 'animator',
-            });
+            source: source,
+            request_type: 'animator',
+          });
 
-          if (insertError) {
+        if (insertError) {
             // ROLLBACK: Remove optimistic update on error
             console.error('❌ Database insert failed - rolling back optimistic update');
             setTables(prev => {
@@ -2993,8 +3008,8 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               },
             };
             
-            throw insertError;
-          }
+          throw insertError;
+      }
 
           // Replace temp ID with real ID from database
           setTables(prev => {
@@ -3023,9 +3038,9 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           
           console.log(`✅ Animator request synced with database - Real ID: ${realRequestId}`);
         }
-      } catch (error) {
+    } catch (error) {
         console.error('Error syncing animator request with database:', error);
-        throw error;
+      throw error;
       }
     }
   }, [tables, loadTableSessions]);
@@ -3313,29 +3328,29 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       return;
     }
 
-    const nowTimestamp = Date.now();
-    const currentElapsed = currentRequest.totalTimeElapsed || 0;
+      const nowTimestamp = Date.now();
+      const currentElapsed = currentRequest.totalTimeElapsed || 0;
 
     // OPTIMISTIC UPDATE: Update child location instantly (0ms)
-    setTables(prev => {
-      const updated = { ...prev };
-      if (!updated[tableId]) return updated;
-      
-      updated[tableId] = {
-        ...updated[tableId],
-        requests: updated[tableId].requests.map(req =>
-          req.id === requestId ? {
-            ...req,
-            childLocation: 'kids_zone' as const,
-            timerStartedAt: nowTimestamp,
-            timerPausedAt: undefined,
+      setTables(prev => {
+        const updated = { ...prev };
+        if (!updated[tableId]) return updated;
+        
+        updated[tableId] = {
+          ...updated[tableId],
+          requests: updated[tableId].requests.map(req =>
+            req.id === requestId ? {
+              ...req,
+              childLocation: 'kids_zone' as const,
+              timerStartedAt: nowTimestamp,
+              timerPausedAt: undefined,
             totalTimeElapsed: currentElapsed
-          } : req
-        ),
-      };
-      
-      return updated;
-    });
+            } : req
+          ),
+        };
+        
+        return updated;
+      });
 
     // Update refs immediately
     tablesRef.current = {
@@ -3521,7 +3536,8 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           menu_items (*)
         `)
         .eq('date', targetDate)
-        .eq('is_visible', true);
+        .eq('is_visible', true)
+        .order('created_at', { ascending: true }); // Preserve insertion order
 
       if (error) throw error;
       
@@ -3568,6 +3584,148 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       throw error;
     }
   }, [broadcastUpdate]);
+
+  // Category order functions
+  const getCategoryOrder = useCallback(async (): Promise<string[]> => {
+    try {
+      const { data, error } = await supabase
+        .from('menu_settings')
+        .select('value')
+        .eq('key', 'category_order')
+        .single();
+
+      if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
+        throw error;
+      }
+
+      if (data?.value) {
+        return JSON.parse(data.value);
+      }
+
+      // Fallback to localStorage if no database entry
+      const savedOrder = localStorage.getItem('menuCategoryOrder');
+      if (savedOrder) {
+        try {
+          return JSON.parse(savedOrder);
+        } catch (e) {
+          return [];
+        }
+      }
+
+      return [];
+    } catch (error) {
+      console.error('Error getting category order:', error);
+      // Fallback to localStorage
+      const savedOrder = localStorage.getItem('menuCategoryOrder');
+      if (savedOrder) {
+        try {
+          return JSON.parse(savedOrder);
+        } catch (e) {
+          return [];
+        }
+      }
+      return [];
+    }
+  }, []);
+
+  const setCategoryOrder = useCallback(async (order: string[]): Promise<void> => {
+    try {
+      // Save to database - real-time subscription will handle updates
+      const { error } = await supabase
+        .from('menu_settings')
+        .upsert({
+          key: 'category_order',
+          value: JSON.stringify(order),
+          updated_at: new Date().toISOString(),
+        }, {
+          onConflict: 'key'
+        });
+
+      if (error) throw error;
+
+      // Also save to localStorage as backup
+      localStorage.setItem('menuCategoryOrder', JSON.stringify(order));
+
+      console.log(`⚡ Category order updated in database`);
+    } catch (error) {
+      console.error('Error setting category order:', error);
+      // Fallback to localStorage only
+      localStorage.setItem('menuCategoryOrder', JSON.stringify(order));
+      throw error;
+    }
+  }, []);
+
+  // Item order functions per category
+  const getItemOrder = useCallback(async (category: string): Promise<string[]> => {
+    try {
+      const key = `item_order_${category}`;
+      const { data, error } = await supabase
+        .from('menu_settings')
+        .select('value')
+        .eq('key', key)
+        .single();
+
+      if (error && error.code !== 'PGRST116') {
+        throw error;
+      }
+
+      if (data?.value) {
+        return JSON.parse(data.value);
+      }
+
+      // Fallback to localStorage
+      const savedOrder = localStorage.getItem(`menuItemOrder_${category}`);
+      if (savedOrder) {
+        try {
+          return JSON.parse(savedOrder);
+        } catch (e) {
+          return [];
+        }
+      }
+
+      return [];
+    } catch (error) {
+      console.error('Error getting item order:', error);
+      // Fallback to localStorage
+      const savedOrder = localStorage.getItem(`menuItemOrder_${category}`);
+      if (savedOrder) {
+        try {
+          return JSON.parse(savedOrder);
+        } catch (e) {
+          return [];
+        }
+      }
+      return [];
+    }
+  }, []);
+
+  const setItemOrder = useCallback(async (category: string, itemIds: string[]): Promise<void> => {
+    try {
+      const key = `item_order_${category}`;
+      // Save to database - real-time subscription will handle updates
+      const { error } = await supabase
+        .from('menu_settings')
+        .upsert({
+          key: key,
+          value: JSON.stringify(itemIds),
+          updated_at: new Date().toISOString(),
+        }, {
+          onConflict: 'key'
+        });
+
+      if (error) throw error;
+
+      // Also save to localStorage as backup
+      localStorage.setItem(`menuItemOrder_${category}`, JSON.stringify(itemIds));
+
+      console.log(`⚡ Item order updated in database for category: ${category}`);
+    } catch (error) {
+      console.error('Error setting item order:', error);
+      // Fallback to localStorage only
+      localStorage.setItem(`menuItemOrder_${category}`, JSON.stringify(itemIds));
+      throw error;
+    }
+  }, []);
 
   const toggleDailyMenuItemVisibility = useCallback(async (itemId: string, date: string, isVisible: boolean) => {
     try {
@@ -3679,6 +3837,10 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     getDailyMenuItems,
     setDailyMenuItems,
     toggleDailyMenuItemVisibility,
+    getCategoryOrder,
+    setCategoryOrder,
+    getItemOrder,
+    setItemOrder,
     submitRating,
     getRevenueReport,
     getPendingOrders,
