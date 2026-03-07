@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom';
 import { CheckCircle2, Loader2, Clock, Home, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useRestaurant } from '@/context/RestaurantContext';
+import { useRestaurant, TableRequest } from '@/context/RestaurantContext';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 
@@ -48,7 +48,7 @@ const KidsZoneDashboard: React.FC = () => {
   // Get animator requests (pending only)
   // Include realtimeUpdateVersion to force re-render on real-time updates
   const animatorRequests = useMemo(() => {
-    const requests: Array<{ tableId: string; request: any }> = [];
+    const requests: Array<{ tableId: string; request: TableRequest }> = [];
     Object.values(tables).forEach(table => {
       table.requests.forEach(req => {
         if (req.requestType === 'animator' && req.status === 'pending') {
@@ -57,7 +57,7 @@ const KidsZoneDashboard: React.FC = () => {
       });
     });
     return requests;
-  }, [tables, realtimeUpdateVersion]);
+  }, [tables]); // realtimeUpdateVersion is not needed as dependency
 
   // Count pending animator requests
   const pendingAnimatorCount = useMemo(() => animatorRequests.length, [animatorRequests]);
@@ -83,7 +83,7 @@ const KidsZoneDashboard: React.FC = () => {
 
   // Calculate timer display for a request
   // Timer only counts when child is in kids_zone (not paused, not on table)
-  const calculateTimer = useCallback((request: any) => {
+  const calculateTimer = useCallback((request: TableRequest): { minutes: number; seconds: number; totalSeconds: number } | null => {
     // Timer only exists if child has been in kids zone at least once
     if (!request.timerStartedAt && !request.totalTimeElapsed) return null;
     

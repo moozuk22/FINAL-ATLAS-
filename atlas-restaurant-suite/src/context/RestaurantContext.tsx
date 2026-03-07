@@ -375,7 +375,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   }, []);
   
   // Helper function to broadcast updates to all tabs/windows (0ms)
-  const broadcastUpdate = useCallback((type: string, payload: any) => {
+  const broadcastUpdate = useCallback((type: string, payload: unknown) => {
     if (broadcastRef.current) {
       broadcastRef.current.postMessage(type, payload);
     } else {
@@ -390,13 +390,20 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
   }, []);
   
+  // Extend Window interface for debugging
+  interface WindowWithDebug extends Window {
+    onNewOrderCallbackRef?: React.MutableRefObject<((requestType: string, tableId: string) => void) | null>;
+    subscriptionLogs?: Array<{ name: string; event: string; timestamp: number; details?: string }>;
+    getSubscriptionLogs?: () => Array<{ name: string; event: string; timestamp: number; details?: string }>;
+  }
+
   // Expose callback ref to window for StaffDashboard to register
   useEffect(() => {
-    (window as any).onNewOrderCallbackRef = onNewOrderCallbackRef;
+    (window as WindowWithDebug).onNewOrderCallbackRef = onNewOrderCallbackRef;
     return () => {
-      delete (window as any).onNewOrderCallbackRef;
+      delete (window as WindowWithDebug).onNewOrderCallbackRef;
     };
-  }, []);
+  }, [onNewOrderCallbackRef]);
 
   // Load menu items from Supabase
   useEffect(() => {
@@ -723,8 +730,8 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       console.log(`[${timeStr}] 📊 Subscription Log: ${name} - ${event}${details ? ` - ${details}` : ''}`);
       
       // Store in window for debugging
-      (window as any).subscriptionLogs = subscriptionLogs;
-      (window as any).getSubscriptionLogs = () => {
+      (window as WindowWithDebug).subscriptionLogs = subscriptionLogs;
+      (window as WindowWithDebug).getSubscriptionLogs = () => {
         console.table(subscriptionLogs.map(log => ({
           Time: new Date(log.timestamp).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 }),
           Subscription: log.name,
@@ -736,7 +743,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     };
 
     // Function to handle subscription errors and reconnect
-    const handleSubscriptionError = (subscriptionName: SubscriptionName, channel: any, setupFn: () => any) => {
+    const handleSubscriptionError = (subscriptionName: SubscriptionName, channel: { unsubscribe: () => void }, setupFn: () => void) => {
       const errorTime = performance.now();
       console.error(`❌ ${subscriptionName} subscription error - attempting reconnection...`);
       subscriptionStatuses[subscriptionName] = 'CHANNEL_ERROR';
@@ -794,7 +801,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     cartSubscription.subscribe((status) => {
       const subscribeTime = performance.now() - cartSubscribeStart;
       console.log(`📡 Cart subscription status: ${status} (took ${subscribeTime.toFixed(2)}ms to subscribe)`);
-      subscriptionStatuses.cart = status as any;
+      subscriptionStatuses.cart = status as SubscriptionStatus;
       addSubscriptionLog('cart', status === 'SUBSCRIBED' ? 'SUBSCRIBED' : 'ERROR', `Status: ${status} (${subscribeTime.toFixed(2)}ms)`);
         // #region agent log
         fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:436',message:'Cart subscription status changed',data:{status},timestamp:Date.now(),runId:'run1',hypothesisId:'I'})}).catch(()=>{});
@@ -936,7 +943,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     requestsSubscription.subscribe((status) => {
       const subscribeTime = performance.now() - requestsSubscribeStart;
       console.log(`📡 Requests subscription status: ${status} (took ${subscribeTime.toFixed(2)}ms to subscribe)`);
-      subscriptionStatuses.requests = status as any;
+      subscriptionStatuses.requests = status as SubscriptionStatus;
       addSubscriptionLog('requests', status === 'SUBSCRIBED' ? 'SUBSCRIBED' : 'ERROR', `Status: ${status} (${subscribeTime.toFixed(2)}ms)`);
         // #region agent log
         fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:495',message:'Requests subscription status changed',data:{status},timestamp:Date.now(),runId:'run1',hypothesisId:'I'})}).catch(()=>{});
@@ -1007,7 +1014,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     menuSubscription.subscribe((status) => {
       const subscribeTime = performance.now() - menuSubscribeStart;
       console.log(`📡 Menu subscription status: ${status} (took ${subscribeTime.toFixed(2)}ms to subscribe)`);
-      subscriptionStatuses.menu = status as any;
+      subscriptionStatuses.menu = status as SubscriptionStatus;
       addSubscriptionLog('menu', status === 'SUBSCRIBED' ? 'SUBSCRIBED' : 'ERROR', `Status: ${status} (${subscribeTime.toFixed(2)}ms)`);
         // #region agent log
         fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:548',message:'Menu subscription status changed',data:{status},timestamp:Date.now(),runId:'run1',hypothesisId:'I'})}).catch(()=>{});
@@ -1040,7 +1047,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     const tablesSubscription = setupTablesSubscription();
     tablesSubscription.subscribe((status) => {
         console.log('📡 Tables subscription status:', status);
-      subscriptionStatuses.tables = status as any;
+      subscriptionStatuses.tables = status as SubscriptionStatus;
         // #region agent log
         fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:567',message:'Tables subscription status changed',data:{status},timestamp:Date.now(),runId:'run1',hypothesisId:'I'})}).catch(()=>{});
         // #endregion
@@ -1072,7 +1079,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     const dailyMenuSubscription = setupDailyMenuSubscription();
     dailyMenuSubscription.subscribe((status) => {
         console.log('📡 Daily menu subscription status:', status);
-      subscriptionStatuses.dailyMenu = status as any;
+      subscriptionStatuses.dailyMenu = status as SubscriptionStatus;
         // #region agent log
         fetch('http://127.0.0.1:7245/ingest/d1dcdf1e-0dcf-406d-bcdb-293c197ab831',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RestaurantContext.tsx:587',message:'Daily menu subscription status changed',data:{status},timestamp:Date.now(),runId:'run1',hypothesisId:'I'})}).catch(()=>{});
         // #endregion
@@ -1090,7 +1097,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       supabase.removeChannel(tablesSubscription);
       supabase.removeChannel(dailyMenuSubscription);
     };
-  }, []); // Empty dependency array - subscriptions should only be created once
+  }, [loadTableSessions]); // Include loadTableSessions for consistency
 
   const getTableSession = useCallback((tableId: string, isVip = false): TableSession => {
     if (tables[tableId]) {
@@ -1761,7 +1768,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       console.error('Error syncing waiter call with database:', error);
       throw error;
     }
-  }, [loadTableSessions]);
+  }, [loadTableSessions, broadcastUpdate]);
 
   const requestBill = useCallback(async (tableId: string, paymentMethod: 'cash' | 'card', source: 'nfc' | 'qr' | 'direct' = 'direct') => {
     // Get current table state for calculating total
@@ -1958,7 +1965,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       console.error('Error syncing bill request with database:', error);
       throw error;
     }
-  }, [loadTableSessions]);
+  }, [loadTableSessions, broadcastUpdate]);
 
   const completeRequest = useCallback(async (tableId: string, requestId: string) => {
     // Get current state for rollback
@@ -2046,7 +2053,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       // Error already handled in try block
       throw error;
     }
-  }, [loadTableSessions]);
+  }, [loadTableSessions, broadcastUpdate]);
 
   // Complete child session - calculate final charge and add to bill
   // MUST be defined before markAsPaid since markAsPaid uses it
@@ -2622,7 +2629,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       
       throw error;
     }
-  }, [loadTableSessions]);
+  }, [loadTableSessions, broadcastUpdate]);
 
   const getCartTotal = useCallback((tableId: string): number => {
     const table = tables[tableId];

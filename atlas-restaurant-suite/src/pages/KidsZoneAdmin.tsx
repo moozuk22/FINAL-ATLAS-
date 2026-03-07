@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Loader2, Clock, Sparkles, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useRestaurant } from '@/context/RestaurantContext';
+import { useRestaurant, TableRequest } from '@/context/RestaurantContext';
 import { cn } from '@/lib/utils';
 
 const KidsZoneAdmin: React.FC = () => {
@@ -30,7 +30,7 @@ const KidsZoneAdmin: React.FC = () => {
 
   // Get all animator requests (all statuses for admin view)
   const allAnimatorRequests = useMemo(() => {
-    const requests: Array<{ tableId: string; request: any }> = [];
+    const requests: Array<{ tableId: string; request: TableRequest }> = [];
     Object.values(tables).forEach(table => {
       table.requests.forEach(req => {
         if (req.requestType === 'animator' || req.requestType === 'kids_zone') {
@@ -43,7 +43,7 @@ const KidsZoneAdmin: React.FC = () => {
 
   // Calculate timer display for a request
   // Timer only counts when child is in kids_zone (not paused, not on table)
-  const calculateTimer = useCallback((request: any): any => {
+  const calculateTimer = useCallback((request: TableRequest): { minutes: number; seconds: number; totalSeconds: number } | null => {
     // Timer only exists if child has been in kids zone at least once
     if (!request.timerStartedAt && !request.totalTimeElapsed) return null;
     

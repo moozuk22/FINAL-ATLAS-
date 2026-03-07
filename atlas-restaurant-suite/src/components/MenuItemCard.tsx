@@ -110,15 +110,15 @@ const MenuItemCard: React.FC<MenuItemCardProps> = ({
       <div className="flex items-start justify-between gap-2.5 sm:gap-3 md:gap-4">
         {/* Item Name, Description and Price */}
         <div className="flex-1 min-w-0 pr-1">
-          <div className="flex items-start justify-between gap-2 sm:gap-3 mb-1">
-            <h3 className="font-display text-sm sm:text-base md:text-lg font-semibold text-foreground tracking-tight flex-1 leading-snug sm:leading-tight">
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1 sm:gap-2 sm:gap-3 mb-1">
+            <h3 className="font-display text-sm sm:text-base md:text-lg font-semibold text-foreground tracking-tight leading-snug sm:leading-tight break-words hyphens-auto">
               {displayName}
             </h3>
-            <div className="flex items-baseline gap-0.5 flex-shrink-0 ml-1.5">
-              <span className="text-sm sm:text-base md:text-lg font-bold text-primary">
+            <div className="flex items-baseline gap-0.5 flex-shrink-0 sm:ml-1.5">
+              <span className="text-sm sm:text-base md:text-lg font-bold text-primary whitespace-nowrap">
                 {price.toFixed(2)}
               </span>
-              <span className="text-[9px] sm:text-[10px] text-muted-foreground/70 font-medium uppercase tracking-wider">EUR</span>
+              <span className="text-[9px] sm:text-[10px] text-muted-foreground/70 font-medium uppercase tracking-wider whitespace-nowrap">EUR</span>
             </div>
           </div>
           {description && (

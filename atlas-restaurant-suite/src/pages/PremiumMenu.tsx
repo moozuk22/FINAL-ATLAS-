@@ -33,7 +33,7 @@ const PremiumMenu: React.FC = () => {
   
   // Use useMemo to ensure session updates when tables change from real-time subscriptions
   // Include realtimeUpdateVersion to force re-render on real-time updates
-  const session = useMemo(() => getTableSession(tableId, isVip), [tables, tableId, isVip, getTableSession, realtimeUpdateVersion]);
+  const session = useMemo(() => getTableSession(tableId, isVip), [tables, tableId, isVip, getTableSession]); // realtimeUpdateVersion is not needed as dependency
   const cartTotal = getCartTotal(tableId);
   const cartItemCount = getCartItemCount(tableId);
 

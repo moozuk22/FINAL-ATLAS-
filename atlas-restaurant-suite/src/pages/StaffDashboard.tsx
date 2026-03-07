@@ -44,7 +44,10 @@ const StaffDashboard: React.FC = () => {
   // Register instant (0ms) new order detection callback
   useEffect(() => {
     // Access the callback ref through window (exposed by RestaurantContext)
-    const onNewOrderCallbackRef = (window as any).onNewOrderCallbackRef;
+    interface WindowWithCallback extends Window {
+      onNewOrderCallbackRef?: React.MutableRefObject<((requestType: string, tableId: string) => void) | null>;
+    }
+    const onNewOrderCallbackRef = (window as WindowWithCallback).onNewOrderCallbackRef;
     if (onNewOrderCallbackRef) {
       // Register our callback for instant feedback
       const instantFeedbackCallback = (requestType: string, tableId: string) => {
@@ -96,7 +99,7 @@ const StaffDashboard: React.FC = () => {
     return Object.values(tables).reduce((count, table) => {
       return count + table.requests.filter(r => r.status === 'pending').length;
     }, 0);
-  }, [tables, realtimeUpdateVersion]);
+  }, [tables]); // realtimeUpdateVersion is not needed as dependency
 
   // Calculate total revenue - memoized
   // Include realtimeUpdateVersion to force re-render on real-time updates
@@ -104,7 +107,7 @@ const StaffDashboard: React.FC = () => {
     return Object.values(tables).reduce((sum, table) => {
       return sum + table.requests.reduce((reqSum, r) => reqSum + r.total, 0);
     }, 0);
-  }, [tables, realtimeUpdateVersion]);
+  }, [tables]); // realtimeUpdateVersion is not needed as dependency
 
   // Get all request IDs for change detection
   const allRequestIds = useMemo(() => {
@@ -113,14 +116,14 @@ const StaffDashboard: React.FC = () => {
       table.requests.forEach(req => ids.add(req.id));
     });
     return ids;
-  }, [tables, realtimeUpdateVersion]);
+  }, [tables]); // realtimeUpdateVersion is not needed as dependency
 
   // Count total requests (all types) for change detection
   const totalRequests = useMemo(() => {
     return Object.values(tables).reduce((count, table) => {
       return count + table.requests.length;
     }, 0);
-  }, [tables, realtimeUpdateVersion]);
+  }, [tables]); // realtimeUpdateVersion is not needed as dependency
 
   // Track previous realtimeUpdateVersion to detect changes
   const prevRealtimeVersionRef = useRef<number>(0);

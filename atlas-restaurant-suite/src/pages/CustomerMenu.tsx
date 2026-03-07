@@ -362,7 +362,7 @@ const CustomerMenu: React.FC = () => {
   // Include realtimeUpdateVersion to force re-render on real-time updates
   const animatorRequest = useMemo(() => {
     return session.requests.find(req => req.requestType === 'animator');
-  }, [session.requests, realtimeUpdateVersion]);
+  }, [session.requests]);
 
   // Calculate timer for animator request
   const childTimer = useMemo(() => {
@@ -406,7 +406,7 @@ const CustomerMenu: React.FC = () => {
     const kidsZoneFee = childTimer?.cost || 0;
     
     return confirmedOrdersTotal + pendingTotal + kidsZoneFee;
-  }, [session.requests, pendingItems, menuItems, childTimer, realtimeUpdateVersion]); // Include realtimeUpdateVersion to force re-render
+  }, [session.requests, pendingItems, menuItems, childTimer]); // realtimeUpdateVersion is not needed as dependency
   
   // Calculate pending items total separately for display
   const pendingItemsTotal = useMemo(() => {
@@ -531,7 +531,7 @@ const CustomerMenu: React.FC = () => {
     });
     
     return items;
-  }, [session.requests, pendingItems, menuItems, realtimeUpdateVersion]); // Include realtimeUpdateVersion to force re-render
+  }, [session.requests, pendingItems, menuItems]); // realtimeUpdateVersion is not needed as dependency
 
   // Load item orders for all categories when dailyMenuItems change
   useEffect(() => {
@@ -624,7 +624,7 @@ const CustomerMenu: React.FC = () => {
     });
 
     return grouped;
-  }, [dailyMenuItems, itemOrders, realtimeUpdateVersion]); // Include itemOrders and realtimeUpdateVersion to force re-render
+  }, [dailyMenuItems, itemOrders]); // realtimeUpdateVersion is not needed as dependency
 
 
 
@@ -655,7 +655,7 @@ const CustomerMenu: React.FC = () => {
       return a.localeCompare(b);
     });
     return [...ordered, ...unordered];
-  }, [groupedItems, categoryOrder, realtimeUpdateVersion]); // Include categoryOrder and realtimeUpdateVersion to force re-render
+  }, [groupedItems, categoryOrder]); // realtimeUpdateVersion is not needed as dependency
 
   // Create a map of item quantities for faster lookup
   // Only use pending items (cart items are only added when order is submitted)

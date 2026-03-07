@@ -12,7 +12,7 @@ interface PendingOrdersProps {
 const PendingOrders: React.FC<PendingOrdersProps> = ({ open, onClose }) => {
   const { getPendingOrders, tables } = useRestaurant();
   // Memoize pending orders to react to real-time table updates
-  const pendingOrders = useMemo(() => getPendingOrders(), [getPendingOrders, tables]);
+  const pendingOrders = useMemo(() => getPendingOrders(), [getPendingOrders]); // tables is not needed as dependency
 
   return (
     <Dialog open={open} onOpenChange={onClose}>

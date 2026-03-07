@@ -696,7 +696,7 @@ const MenuEditor: React.FC = () => {
     });
 
     return grouped;
-  }, [displayItems, itemOrders, itemOrderUpdate]);
+  }, [displayItems, itemOrders]); // itemOrderUpdate is not needed as dependency
 
   // Get all unique categories for creating new ones
   const allCategories = useMemo(() => 
@@ -1029,7 +1029,7 @@ const MenuEditor: React.FC = () => {
         variant: 'destructive',
       });
     }
-  }, [saveCategoryOrder, toast, displayItems, groupedItems, updateMenuItem, showNewCategoryInput, newCategoryName, allCategories, setItemOrderUpdate]);
+  }, [saveCategoryOrder, saveItemOrder, toast, displayItems, groupedItems, updateMenuItem, showNewCategoryInput, newCategoryName]); // allCategories is not needed as dependency
 
   const handleCreateCategory = () => {
     if (!newCategoryName.trim()) {
