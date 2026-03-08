@@ -122,7 +122,7 @@ const MenuItemCard: React.FC<MenuItemCardProps> = ({
             </div>
           </div>
           {description && (
-            <p className="text-[11px] sm:text-xs md:text-sm text-muted-foreground/80 mt-0.5 sm:mt-1 leading-relaxed line-clamp-2">
+            <p className="text-[11px] sm:text-xs md:text-sm text-muted-foreground/80 mt-0.5 sm:mt-1 leading-relaxed">
               {description}
             </p>
           )}

@@ -628,34 +628,17 @@ const CustomerMenu: React.FC = () => {
 
 
 
-  // Filter out empty categories and sort them - use same order as MenuEditor
-  // Include realtimeUpdateVersion to force re-render on real-time updates
+  // Category order: only from admin drag-and-drop (saved order). No alphabetical or other auto-sort.
   const sortedCategories = useMemo(() => {
     const categories = Object.keys(groupedItems).filter(cat => groupedItems[cat].length > 0);
     const order = categoryOrder || [];
-    
     if (!Array.isArray(order) || order.length === 0) {
-      // Default: emoji categories first, then alphabetically
-      return categories.sort((a, b) => {
-        const aHasEmoji = /^[\p{Emoji}]/u.test(a);
-        const bHasEmoji = /^[\p{Emoji}]/u.test(b);
-        if (aHasEmoji && !bHasEmoji) return -1;
-        if (!aHasEmoji && bHasEmoji) return 1;
-        return a.localeCompare(b);
-      });
+      return categories; // natural/insertion order, no sort
     }
-    
-    // Sort by saved order, then alphabetically for new categories
     const ordered = order.filter(cat => categories.includes(cat));
-    const unordered = categories.filter(cat => !order.includes(cat)).sort((a, b) => {
-      const aHasEmoji = /^[\p{Emoji}]/u.test(a);
-      const bHasEmoji = /^[\p{Emoji}]/u.test(b);
-      if (aHasEmoji && !bHasEmoji) return -1;
-      if (!aHasEmoji && bHasEmoji) return 1;
-      return a.localeCompare(b);
-    });
+    const unordered = categories.filter(cat => !order.includes(cat)); // no sort - append in natural order
     return [...ordered, ...unordered];
-  }, [groupedItems, categoryOrder]); // realtimeUpdateVersion is not needed as dependency
+  }, [groupedItems, categoryOrder]);
 
   // Create a map of item quantities for faster lookup
   // Only use pending items (cart items are only added when order is submitted)

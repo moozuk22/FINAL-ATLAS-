@@ -740,17 +740,15 @@ const MenuEditor: React.FC = () => {
     }
   }, [categoryOrder, saveCategoryOrder]);
 
-  // Sort categories by saved order, then alphabetically
+  // Category order: only from drag-and-drop in admin (saved order). No alphabetical or other auto-sort.
   const sortedCategories = useMemo(() => {
     const categories = Object.keys(groupedItems).filter(cat => cat !== '📦 Unassigned');
     const order = categoryOrder || [];
     if (!Array.isArray(order) || order.length === 0) {
-      return categories.sort((a, b) => a.localeCompare(b));
+      return categories; // natural/insertion order, no sort
     }
-    
-    // Sort by saved order, then alphabetically for new categories
     const ordered = order.filter(cat => categories.includes(cat));
-    const unordered = categories.filter(cat => !order.includes(cat)).sort((a, b) => a.localeCompare(b));
+    const unordered = categories.filter(cat => !order.includes(cat)); // no sort - append in natural order
     return [...ordered, ...unordered];
   }, [groupedItems, categoryOrder]);
 
