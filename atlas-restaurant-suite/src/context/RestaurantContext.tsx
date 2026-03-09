@@ -278,7 +278,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         // Instantly update request status (0ms, no database)
         const { tableId, requestId, updates } = payload;
         const prevReq = tablesRef.current[tableId]?.requests.find((r: { id: string }) => r.id === requestId);
-        const isAnimatorCalledToTable = prevReq?.requestType === 'animator' && prevReq?.childLocation === 'kids_zone' && updates?.timestamp;
+        const isAnimatorCalledToTable = prevReq?.requestType === 'animator' && (prevReq?.childLocation === 'kids_zone' || prevReq?.childLocation === 'returning_to_table') && updates?.timestamp;
         
         setTables(prev => {
           const updated = { ...prev };
@@ -2860,6 +2860,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   }, [menuItems, broadcastUpdate]);
 
   // Call animator function
+  // When kid is on table (no active animator request, e.g. after "Затвори заявката"), client can call again → new request is created → animator receives request (sound + toast via callback and NEW_REQUEST broadcast).
   const callAnimator = useCallback(async (tableId: string, source: 'nfc' | 'qr' | 'direct' = 'direct') => {
     // Check if there's already an active animator request in local state
     const currentTable = tables[tableId];

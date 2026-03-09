@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle2, Loader2, Clock, Sparkles, Bell } from 'lucide-react';
+import { CheckCircle2, Loader2, Clock, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useRestaurant, TableRequest } from '@/context/RestaurantContext';
 import { useToast } from '@/hooks/use-toast';
@@ -37,7 +37,6 @@ const KidsZoneDashboard: React.FC = () => {
   const [takingBackRequests, setTakingBackRequests] = useState<Set<string>>(new Set());
   const [clearingRequests, setClearingRequests] = useState<Set<string>>(new Set());
   const [newCallTableIds, setNewCallTableIds] = useState<Set<string>>(new Set());
-  const [animatorCallLog, setAnimatorCallLog] = useState<Array<{ tableId: string; calledAt: number }>>([]);
   const prevPendingAnimatorCountRef = useRef<number>(0);
   const prevAnimatorRequestIdsRef = useRef<Set<string>>(new Set());
   const hasInitialSyncRef = useRef<boolean>(false);
@@ -79,13 +78,6 @@ const KidsZoneDashboard: React.FC = () => {
       prevPendingAnimatorCountRef.current = pendingAnimatorCount;
       if (animatorRequests.length > 0) {
         setNewCallTableIds(new Set(animatorRequests.map(c => c.tableId)));
-        setAnimatorCallLog(prev => {
-          const entries = animatorRequests.map(({ tableId, request }) => ({
-            tableId,
-            calledAt: typeof request.timestamp === 'number' ? request.timestamp : Date.now(),
-          }));
-          return [...entries.reverse(), ...prev].slice(0, 30);
-        });
       }
       return;
     }
@@ -94,13 +86,6 @@ const KidsZoneDashboard: React.FC = () => {
     if (newCalls.length > 0) {
       playAlertSound();
       setNewCallTableIds(prev => new Set([...prev, ...newCalls.map(c => c.tableId)]));
-      setAnimatorCallLog(prev => {
-        const entries = newCalls.map(({ tableId, request }) => ({
-          tableId,
-          calledAt: typeof request.timestamp === 'number' ? request.timestamp : Date.now(),
-        }));
-        return [...entries, ...prev].slice(0, 30);
-      });
       newCalls.forEach(({ tableId }) => {
         const tableLabel = tableId.replace('_', ' ');
         toast({
@@ -390,28 +375,6 @@ const KidsZoneDashboard: React.FC = () => {
         </div>
       </header>
 
-      {/* Call log: when animator was called to a table */}
-      {animatorCallLog.length > 0 && (
-        <div className="container mx-auto px-4 sm:px-6 pt-2 pb-2">
-          <div className="bg-card border border-border rounded-xl p-3 sm:p-4 shadow-sm">
-            <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground mb-2 sm:mb-3">
-              <Bell className="h-4 w-4 text-primary" />
-              Кога ви призоваха
-            </h2>
-            <ul className="space-y-1.5 max-h-32 overflow-y-auto">
-              {animatorCallLog.map((entry, i) => (
-                <li key={`${entry.tableId}-${entry.calledAt}-${i}`} className="flex items-center justify-between text-xs sm:text-sm text-muted-foreground">
-                  <span className="font-medium text-foreground">{entry.tableId.replace('_', ' ')}</span>
-                  <span>
-                    {new Date(entry.calledAt).toLocaleTimeString('bg-BG', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      )}
-
       {/* Table Grid */}
       <main className="container mx-auto px-4 sm:px-6 py-4 sm:py-6 md:py-8">
         {loading ? (
@@ -433,6 +396,8 @@ const KidsZoneDashboard: React.FC = () => {
               const isOnTable = !animatorStatus?.childLocation || animatorStatus?.childLocation === 'table';
               // Only when table requested animator after kid was already in zone (call-to-table)
               const wasCalledToTable = isInKidsZone && animatorStatus?.request?.timerStartedAt != null && (animatorStatus.request.timestamp || 0) > (animatorStatus.request.timerStartedAt || 0);
+              // Table called again while kid is "returning to table" (timestamp updated after we accepted)
+              const wasCalledAgainWhenReturning = isReturningToTable && (animatorStatus?.request?.timestamp || 0) > (animatorStatus?.request?.timerPausedAt || 0);
               
               return (
                 <div
@@ -540,12 +505,44 @@ const KidsZoneDashboard: React.FC = () => {
                           </div>
                         )}
 
-                        {/* Animator has accepted the call — child is being returned to table */}
+                        {/* Table called again while kid is returning to table — show same notification as in-zone (text + Приеми) */}
+                        {wasCalledAgainWhenReturning && (
+                          <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
+                            <p className="text-sm font-semibold text-amber-800 flex items-center gap-2">
+                              <span className="relative flex h-2 w-2">
+                                <span className="animate-ping absolute inline-flex h-2 w-2 rounded-full bg-amber-500 opacity-75" />
+                                <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500" />
+                              </span>
+                              Ви повикаха към масата — ви чакат
+                            </p>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="mt-3 w-full border-amber-600/50 text-amber-800 hover:bg-amber-500/10 font-semibold"
+                              onClick={() => handleReturnChildToTable(tableId, animatorStatus.request.id)}
+                              disabled={returningRequests.has(`${tableId}_${animatorStatus.request.id}`)}
+                            >
+                              {returningRequests.has(`${tableId}_${animatorStatus.request.id}`) ? (
+                                <>
+                                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                  Връщане...
+                                </>
+                              ) : (
+                                'Приеми'
+                              )}
+                            </Button>
+                          </div>
+                        )}
+
+                        {/* Animator has accepted the call — child is being returned to table; table can call again → animator gets notification */}
                         {isReturningToTable && (
                           <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-3">
                             <p className="text-sm font-semibold text-blue-800 flex items-center gap-2">
                               <span className="h-2 w-2 rounded-full bg-blue-500" />
                               Прието — върнете детето на масата
+                            </p>
+                            <p className="text-xs text-blue-700/90 mt-1.5">
+                              При ново повикване от масата ще получите известие и звук.
                             </p>
                           </div>
                         )}
@@ -623,7 +620,7 @@ const KidsZoneDashboard: React.FC = () => {
                                   Затваряне...
                                 </>
                               ) : (
-                                'Детето е на масата — затвори заявката'
+                                'Затвори заявката'
                               )}
                             </Button>
                             <Button
