@@ -108,6 +108,8 @@ interface RestaurantContextType {
   returnChildToTable: (tableId: string, requestId: string) => Promise<void>;
   takeChildBackToZone: (tableId: string, requestId: string) => Promise<void>;
   completeChildSession: (tableId: string, requestId: string) => Promise<void>;
+  /** Complete session (timer + charge) and remove animator request from table when kid is back at table */
+  clearAnimatorRequestAfterReturn: (tableId: string, requestId: string) => Promise<void>;
   markAsPaid: (tableId: string) => Promise<void>;
   markBillRequestsAsPaid: (tableId: string) => Promise<void>;
   resetTable: (tableId: string) => Promise<void>;
@@ -275,6 +277,8 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       } else if (type === 'REQUEST_UPDATED') {
         // Instantly update request status (0ms, no database)
         const { tableId, requestId, updates } = payload;
+        const prevReq = tablesRef.current[tableId]?.requests.find((r: { id: string }) => r.id === requestId);
+        const isAnimatorCalledToTable = prevReq?.requestType === 'animator' && prevReq?.childLocation === 'kids_zone' && updates?.timestamp;
         
         setTables(prev => {
           const updated = { ...prev };
@@ -290,7 +294,34 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         });
         
         setRealtimeUpdateVersion(prev => prev + 1);
+        if (isAnimatorCalledToTable && onNewOrderCallbackRef.current) {
+          try {
+            onNewOrderCallbackRef.current('animator_called_to_table', tableId);
+          } catch (e) { /* ignore */ }
+        }
         console.log(`⚡ INSTANT UPDATE (0ms): Updated ${requestId} in ${tableId} via cross-tab broadcast`);
+      } else if (type === 'REQUEST_REMOVED') {
+        const { tableId, requestId } = payload;
+        setTables(prev => {
+          const updated = { ...prev };
+          if (updated[tableId]) {
+            updated[tableId] = {
+              ...updated[tableId],
+              requests: updated[tableId].requests.filter(req => req.id !== requestId),
+            };
+          }
+          return updated;
+        });
+        tablesRef.current = tablesRef.current[tableId]
+          ? {
+              ...tablesRef.current,
+              [tableId]: {
+                ...tablesRef.current[tableId],
+                requests: tablesRef.current[tableId].requests.filter((r: { id: string }) => r.id !== requestId),
+              },
+            }
+          : tablesRef.current;
+        setRealtimeUpdateVersion(prev => prev + 1);
       } else if (type === 'TABLE_CLEARED') {
         // Instantly clear table (0ms, no database)
         const { tableId } = payload;
@@ -2057,7 +2088,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   // Complete child session - calculate final charge and add to bill
   // MUST be defined before markAsPaid since markAsPaid uses it
-  const completeChildSession = useCallback(async (tableId: string, requestId: string) => {
+  const completeChildSession = useCallback(async (tableId: string, requestId: string, skipReload?: boolean) => {
     try {
       // Get current request with all timer data
       const { data: currentRequest, error: fetchError } = await supabase
@@ -2117,13 +2148,59 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           });
       }
 
-      loadTableSessions();
+      if (skipReload !== true) {
+        loadTableSessions();
+      }
     } catch (error) {
       console.error('Error completing child session:', error);
       loadTableSessions();
       throw error;
     }
   }, [loadTableSessions]);
+
+  /** When kid has been returned to table: complete session (timer + charge) and remove animator request so the card clears */
+  const clearAnimatorRequestAfterReturn = useCallback(async (tableId: string, requestId: string) => {
+    const currentTable = tablesRef.current[tableId];
+    try {
+      await completeChildSession(tableId, requestId, true);
+      const { error } = await supabase
+        .from('table_requests')
+        .delete()
+        .eq('id', requestId)
+        .eq('table_id', tableId)
+        .eq('request_type', 'animator');
+      if (error) {
+        console.error('Error deleting animator request:', error);
+        await loadTableSessions();
+        throw error;
+      }
+      if (currentTable) {
+        setTables(prev => {
+          const updated = { ...prev };
+          if (!updated[tableId]) return updated;
+          updated[tableId] = {
+            ...updated[tableId],
+            requests: updated[tableId].requests.filter(req => req.id !== requestId),
+          };
+          return updated;
+        });
+        tablesRef.current = {
+          ...tablesRef.current,
+          [tableId]: {
+            ...tablesRef.current[tableId],
+            requests: tablesRef.current[tableId].requests.filter(r => r.id !== requestId),
+          },
+        };
+        setRealtimeUpdateVersion(prev => prev + 1);
+        broadcastUpdate('REQUEST_REMOVED', { tableId, requestId });
+      }
+      await loadTableSessions();
+    } catch (error) {
+      console.error('Error clearing animator request after return:', error);
+      loadTableSessions();
+      throw error;
+    }
+  }, [completeChildSession, loadTableSessions, broadcastUpdate]);
 
   const markAsPaid = useCallback(async (tableId: string) => {
     // Get current table data before clearing for archive
@@ -2791,7 +2868,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     );
 
     if (existingRequest) {
-      // OPTIMISTIC UPDATE: Update timestamp immediately (0ms)
+      // Kid already in kids zone (or pending): table is calling animator again — update timestamp and notify
       const newTimestamp = Date.now();
       setTables(prev => {
         const updated = { ...prev };
@@ -2811,7 +2888,6 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         return updated;
       });
 
-      // Update refs immediately
       tablesRef.current = {
         ...tablesRef.current,
         [tableId]: {
@@ -2826,10 +2902,32 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         },
       };
 
-      // Force re-render
       setRealtimeUpdateVersion(prev => prev + 1);
 
-      console.log(`⚡ Optimistic update: Animator request timestamp updated instantly (0ms) - ID: ${existingRequest.id}`);
+      // Notify animator (sound + toast) when table calls again — notification only: "called to table"
+      if (onNewOrderCallbackRef.current) {
+        try {
+          onNewOrderCallbackRef.current('animator_called_to_table', tableId);
+        } catch (e) { /* ignore */ }
+      }
+      broadcastUpdate('REQUEST_UPDATED', {
+        tableId,
+        requestId: existingRequest.id,
+        updates: { timestamp: newTimestamp, source: source },
+      });
+
+      // Persist to DB so animator dashboard and other tabs see the call
+      try {
+        const { error: updateError } = await supabase
+          .from('table_requests')
+          .update({ timestamp: newTimestamp, source: source })
+          .eq('id', existingRequest.id);
+        if (updateError) throw updateError;
+      } catch (e) {
+        console.error('Error updating animator request timestamp:', e);
+      }
+      console.log(`⚡ Animator called again (kid in zone) - table ${tableId}, timestamp updated`);
+      return;
     } else {
       // OPTIMISTIC UPDATE: Add new request immediately (0ms)
       const tempRequestId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -3833,6 +3931,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       returnChildToTable,
       takeChildBackToZone,
       completeChildSession,
+      clearAnimatorRequestAfterReturn,
     markAsPaid,
     markBillRequestsAsPaid,
       resetTable,
@@ -3872,6 +3971,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       returnChildToTable,
       takeChildBackToZone,
       completeChildSession,
+      clearAnimatorRequestAfterReturn,
     markAsPaid,
     markBillRequestsAsPaid,
       resetTable,

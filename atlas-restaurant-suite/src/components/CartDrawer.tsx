@@ -298,7 +298,7 @@ const SortableKidsZoneRow: React.FC<{ time?: string }> = ({ time }) => {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-2">
           <span className="text-base">🎭</span>
-          <span className="font-semibold text-sm sm:text-base text-foreground truncate">
+          <span className="font-semibold text-sm sm:text-base text-foreground break-words min-w-0">
             Детски кът
           </span>
         </div>

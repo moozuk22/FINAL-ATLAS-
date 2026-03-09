@@ -88,7 +88,7 @@ const DraggableAvailableItem: React.FC<{
       }}
     >
       <div className="flex-1 min-w-0">
-        <p className="text-xs sm:text-sm font-medium truncate">{stripAllergenNumbersFromName(item.name)}</p>
+        <p className="text-xs sm:text-sm font-medium break-words">{stripAllergenNumbersFromName(item.name)}</p>
         <p className="text-[10px] sm:text-xs text-muted-foreground">{item.price.toFixed(2)} EUR</p>
       </div>
       <Button
@@ -186,7 +186,7 @@ const SortableDailyItem: React.FC<{
           />
         ) : (
           <>
-            <p className="text-xs sm:text-sm font-medium truncate">{stripAllergenNumbersFromName(item.name)}</p>
+            <p className="text-xs sm:text-sm font-medium break-words">{stripAllergenNumbersFromName(item.name)}</p>
             <p className="text-[10px] sm:text-xs text-muted-foreground">{item.price.toFixed(2)} EUR</p>
           </>
         )}
@@ -304,9 +304,9 @@ const DraggableMenuItem: React.FC<{
           </button>
         )}
         <div className="flex-1 min-w-0">
-          <h3 className="font-medium text-sm sm:text-base text-foreground truncate">{stripAllergenNumbersFromName(item.name)}</h3>
+          <h3 className="font-medium text-sm sm:text-base text-foreground break-words min-w-0">{stripAllergenNumbersFromName(item.name)}</h3>
           {item.desc && (
-            <p className="text-xs sm:text-sm text-muted-foreground mt-0.5 sm:mt-1 line-clamp-2">{item.desc}</p>
+            <p className="text-xs sm:text-sm text-muted-foreground mt-0.5 sm:mt-1 break-words">{item.desc}</p>
           )}
           <p className="text-xs sm:text-sm md:text-base text-primary font-semibold mt-0.5 sm:mt-1">
             {item.price.toFixed(2)} EUR
@@ -1791,7 +1791,7 @@ const MenuEditor: React.FC = () => {
                   <div className="flex-1">
                     <h3 className="font-semibold text-sm sm:text-base text-foreground">{stripAllergenNumbersFromName(draggedItem.name)}</h3>
                     {draggedItem.desc && (
-                      <p className="text-xs sm:text-sm text-muted-foreground mt-1 line-clamp-2">{draggedItem.desc}</p>
+                      <p className="text-xs sm:text-sm text-muted-foreground mt-1 break-words">{draggedItem.desc}</p>
                     )}
                     <p className="text-primary font-semibold text-sm sm:text-base mt-1">
                       {draggedItem.price.toFixed(2)} EUR

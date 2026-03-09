@@ -965,7 +965,7 @@ const CustomerMenu: React.FC = () => {
                         {totalItemCount} {totalItemCount === 1 ? 'арт.' : 'арт.'}
                       </p>
                     )}
-                      <p className="font-bold text-foreground text-[10px] sm:text-xs md:text-sm truncate">
+                      <p className="font-bold text-foreground text-[10px] sm:text-xs md:text-sm break-words min-w-0">
                       {totalBill.toFixed(2)} EUR
                     </p>
                     </div>

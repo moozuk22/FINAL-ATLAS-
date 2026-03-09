@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle2, Loader2, Clock, Home, Sparkles } from 'lucide-react';
+import { CheckCircle2, Loader2, Clock, Sparkles, Bell } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useRestaurant, TableRequest } from '@/context/RestaurantContext';
 import { useToast } from '@/hooks/use-toast';
@@ -31,11 +31,16 @@ const playAlertSound = () => {
 const KidsZoneDashboard: React.FC = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { tables, completeAnimatorRequest, returnChildToTable, takeChildBackToZone, completeChildSession, loading, realtimeUpdateVersion } = useRestaurant();
+  const { tables, completeAnimatorRequest, returnChildToTable, takeChildBackToZone, completeChildSession, clearAnimatorRequestAfterReturn, loading, realtimeUpdateVersion } = useRestaurant();
   const [completingRequests, setCompletingRequests] = useState<Set<string>>(new Set());
   const [returningRequests, setReturningRequests] = useState<Set<string>>(new Set());
   const [takingBackRequests, setTakingBackRequests] = useState<Set<string>>(new Set());
+  const [clearingRequests, setClearingRequests] = useState<Set<string>>(new Set());
+  const [newCallTableIds, setNewCallTableIds] = useState<Set<string>>(new Set());
+  const [animatorCallLog, setAnimatorCallLog] = useState<Array<{ tableId: string; calledAt: number }>>([]);
   const prevPendingAnimatorCountRef = useRef<number>(0);
+  const prevAnimatorRequestIdsRef = useRef<Set<string>>(new Set());
+  const hasInitialSyncRef = useRef<boolean>(false);
   const [currentTime, setCurrentTime] = useState(Date.now());
 
   // Get all table IDs
@@ -62,13 +67,102 @@ const KidsZoneDashboard: React.FC = () => {
   // Count pending animator requests
   const pendingAnimatorCount = useMemo(() => animatorRequests.length, [animatorRequests]);
 
-  // Play sound when new animator request appears
+  // Play sound and show toast when new animator request appears (animator is called)
   useEffect(() => {
-    if (pendingAnimatorCount > prevPendingAnimatorCountRef.current) {
-      playAlertSound();
+    const currentIds = new Set(animatorRequests.map(({ tableId, request }) => `${tableId}_${request.id}`));
+    const prevIds = prevAnimatorRequestIdsRef.current;
+
+    // First run after mount: sync refs and show on-card notification for any already-pending calls (no sound/toast)
+    if (!hasInitialSyncRef.current) {
+      hasInitialSyncRef.current = true;
+      prevAnimatorRequestIdsRef.current = new Set(currentIds);
+      prevPendingAnimatorCountRef.current = pendingAnimatorCount;
+      if (animatorRequests.length > 0) {
+        setNewCallTableIds(new Set(animatorRequests.map(c => c.tableId)));
+        setAnimatorCallLog(prev => {
+          const entries = animatorRequests.map(({ tableId, request }) => ({
+            tableId,
+            calledAt: typeof request.timestamp === 'number' ? request.timestamp : Date.now(),
+          }));
+          return [...entries.reverse(), ...prev].slice(0, 30);
+        });
+      }
+      return;
     }
+
+    const newCalls = animatorRequests.filter(({ tableId, request }) => !prevIds.has(`${tableId}_${request.id}`));
+    if (newCalls.length > 0) {
+      playAlertSound();
+      setNewCallTableIds(prev => new Set([...prev, ...newCalls.map(c => c.tableId)]));
+      setAnimatorCallLog(prev => {
+        const entries = newCalls.map(({ tableId, request }) => ({
+          tableId,
+          calledAt: typeof request.timestamp === 'number' ? request.timestamp : Date.now(),
+        }));
+        return [...entries, ...prev].slice(0, 30);
+      });
+      newCalls.forEach(({ tableId }) => {
+        const tableLabel = tableId.replace('_', ' ');
+        toast({
+          title: '🎭 Обаждане за аниматор',
+          description: `${tableLabel} ви призовава за детския кът.`,
+          duration: 5000,
+        });
+      });
+    }
+
     prevPendingAnimatorCountRef.current = pendingAnimatorCount;
-  }, [pendingAnimatorCount]);
+    prevAnimatorRequestIdsRef.current = currentIds;
+  }, [pendingAnimatorCount, animatorRequests, toast]);
+
+  // Clear on-card "new call" state when a table's request is no longer pending (e.g. accepted)
+  useEffect(() => {
+    setNewCallTableIds(prev => {
+      const next = new Set(prev);
+      let changed = false;
+      next.forEach(tableId => {
+        const table = tables[tableId];
+        const hasPending = table?.requests.some(
+          r => r.requestType === 'animator' && r.status === 'pending'
+        );
+        if (!hasPending) {
+          next.delete(tableId);
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [tables]);
+
+  // When kid is in kids zone, customer "call animator" = notification only ("called to table"). Register callback so we get sound + toast.
+  useEffect(() => {
+    interface WindowWithCallback extends Window {
+      onNewOrderCallbackRef?: React.MutableRefObject<((requestType: string, tableId: string) => void) | null>;
+    }
+    const ref = (window as WindowWithCallback).onNewOrderCallbackRef;
+    if (!ref) return;
+    const handler = (requestType: string, tableId: string) => {
+      if (requestType === 'animator_called_to_table') {
+        playAlertSound();
+        const tableLabel = tableId.replace('_', ' ');
+        toast({
+          title: 'Ви повикаха към масата',
+          description: `${tableLabel} ви чака — детето е в детския кът.`,
+          duration: 5000,
+        });
+      } else if (requestType === 'animator') {
+        playAlertSound();
+        const tableLabel = tableId.replace('_', ' ');
+        toast({
+          title: '🎭 Обаждане за аниматор',
+          description: `${tableLabel} ви призовава за детския кът.`,
+          duration: 5000,
+        });
+      }
+    };
+    ref.current = handler;
+    return () => { ref.current = null; };
+  }, [toast]);
 
   // Update current time every second for timer display
   useEffect(() => {
@@ -146,14 +240,19 @@ const KidsZoneDashboard: React.FC = () => {
       // Real-time subscription will automatically update all tabs
       
       toast({
-        title: '✅ Заявката е приета',
+        title: '✅ Поръчката е приета',
         description: `Детето от ${tableId.replace('_', ' ')} е прието в детския кът. Таймерът започна.`,
+      });
+      setNewCallTableIds(prev => {
+        const next = new Set(prev);
+        next.delete(tableId);
+        return next;
       });
     } catch (error) {
       console.error('Error completing animator request:', error);
       toast({
         title: 'Грешка',
-        description: 'Неуспешно приемане на заявка',
+        description: 'Неуспешно приемане на поръчка',
         variant: 'destructive',
       });
     } finally {
@@ -229,6 +328,32 @@ const KidsZoneDashboard: React.FC = () => {
     }
   }, [takeChildBackToZone, toast, takingBackRequests]);
 
+  const handleClearAnimatorRequestAfterReturn = useCallback(async (tableId: string, requestId: string) => {
+    const requestKey = `${tableId}_${requestId}`;
+    if (clearingRequests.has(requestKey)) return;
+    setClearingRequests(prev => new Set(prev).add(requestKey));
+    try {
+      await clearAnimatorRequestAfterReturn(tableId, requestId);
+      toast({
+        title: '✅ Заявката е затворена',
+        description: `Детето е на масата. Заявката за ${tableId.replace('_', ' ')} е премахната.`,
+      });
+    } catch (error) {
+      console.error('Error clearing animator request:', error);
+      toast({
+        title: 'Грешка',
+        description: 'Неуспешно затваряне на заявката',
+        variant: 'destructive',
+      });
+    } finally {
+      setClearingRequests(prev => {
+        const next = new Set(prev);
+        next.delete(requestKey);
+        return next;
+      });
+    }
+  }, [clearAnimatorRequestAfterReturn, toast, clearingRequests]);
+
   return (
     <div className="min-h-screen pb-20 sm:pb-24">
       {/* Header */}
@@ -265,6 +390,28 @@ const KidsZoneDashboard: React.FC = () => {
         </div>
       </header>
 
+      {/* Call log: when animator was called to a table */}
+      {animatorCallLog.length > 0 && (
+        <div className="container mx-auto px-4 sm:px-6 pt-2 pb-2">
+          <div className="bg-card border border-border rounded-xl p-3 sm:p-4 shadow-sm">
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground mb-2 sm:mb-3">
+              <Bell className="h-4 w-4 text-primary" />
+              Кога ви призоваха
+            </h2>
+            <ul className="space-y-1.5 max-h-32 overflow-y-auto">
+              {animatorCallLog.map((entry, i) => (
+                <li key={`${entry.tableId}-${entry.calledAt}-${i}`} className="flex items-center justify-between text-xs sm:text-sm text-muted-foreground">
+                  <span className="font-medium text-foreground">{entry.tableId.replace('_', ' ')}</span>
+                  <span>
+                    {new Date(entry.calledAt).toLocaleTimeString('bg-BG', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+
       {/* Table Grid */}
       <main className="container mx-auto px-4 sm:px-6 py-4 sm:py-6 md:py-8">
         {loading ? (
@@ -279,10 +426,13 @@ const KidsZoneDashboard: React.FC = () => {
             {tableIds.map(tableId => {
               const animatorStatus = getTableAnimatorStatus(tableId);
               const hasPendingRequest = animatorStatus?.status === 'pending';
+              const hasNewCallNotification = hasPendingRequest && newCallTableIds.has(tableId);
               const hasConfirmedRequest = animatorStatus?.status === 'confirmed';
               const isInKidsZone = animatorStatus?.childLocation === 'kids_zone';
               const isReturningToTable = animatorStatus?.childLocation === 'returning_to_table';
               const isOnTable = !animatorStatus?.childLocation || animatorStatus?.childLocation === 'table';
+              // Only when table requested animator after kid was already in zone (call-to-table)
+              const wasCalledToTable = isInKidsZone && animatorStatus?.request?.timerStartedAt != null && (animatorStatus.request.timestamp || 0) > (animatorStatus.request.timerStartedAt || 0);
               
               return (
                 <div
@@ -295,86 +445,132 @@ const KidsZoneDashboard: React.FC = () => {
                     !animatorStatus && 'border-border'
                   )}
                 >
-                  {/* Alert Circle for Pending */}
+                  {/* Alert dot for new request */}
                   {hasPendingRequest && (
-                    <div className="absolute top-2 right-2 h-4 w-4 bg-destructive rounded-full animate-ping" />
+                    <div className="absolute top-3 right-3 z-10 h-2.5 w-2.5 bg-destructive rounded-full animate-ping" />
                   )}
                   
-                  {/* Header */}
-                  <div className="p-3 sm:p-4 border-b border-border">
-                    <div className="flex items-center justify-between">
-                      <h3 className="font-display text-base sm:text-lg font-semibold">
-                        {tableId.replace('_', ' ')}
-                      </h3>
+                  {/* New call banner — only when pending and new */}
+                  {hasNewCallNotification && (
+                    <div className="bg-destructive text-destructive-foreground px-4 py-2.5 text-center">
+                      <p className="text-xs sm:text-sm font-semibold tracking-wide">
+                        Получена поръчка — ви призовават за детския кът
+                      </p>
+                      <p className="text-xs opacity-90 mt-0.5">Приемете от картата по-долу</p>
+                    </div>
+                  )}
+                  
+                  {/* Header: table + single status + call time */}
+                  <div className="p-4 sm:p-5 border-b border-border/80 bg-muted/20">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h3 className="font-display text-lg sm:text-xl font-semibold text-foreground tracking-tight">
+                          {tableId.replace('_', ' ')}
+                        </h3>
+                        {animatorStatus && (
+                          <p className="text-xs text-muted-foreground mt-1 tabular-nums">
+                            Повикани в {new Date(animatorStatus.request.timestamp).toLocaleTimeString('bg-BG', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              second: '2-digit',
+                            })}
+                            {animatorStatus.assignedTo && (
+                              <span className="text-foreground/70"> · Прието от {animatorStatus.assignedTo}</span>
+                            )}
+                          </p>
+                        )}
+                      </div>
                       {hasPendingRequest && (
-                        <span className="text-xs font-semibold text-destructive animate-pulse">
-                          ⚠️ НОВА ЗАЯВКА
+                        <span className="shrink-0 inline-flex items-center rounded-full bg-destructive/15 px-2.5 py-1 text-xs font-semibold text-destructive">
+                          Нова поръчка
                         </span>
                       )}
                       {isInKidsZone && (
-                        <span className="text-xs font-semibold text-yellow-600 animate-pulse">
-                          🎭 В къта • Таймер активен
+                        <span className="shrink-0 inline-flex items-center rounded-full bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-700">
+                          В детския кът
                         </span>
                       )}
                       {isReturningToTable && (
-                        <span className="text-xs font-semibold text-blue-600">
-                          🏠 На масата • Таймер паузиран
+                        <span className="shrink-0 inline-flex items-center rounded-full bg-blue-500/15 px-2.5 py-1 text-xs font-semibold text-blue-700">
+                          На масата
                         </span>
                       )}
                       {hasConfirmedRequest && isOnTable && (
-                        <span className="text-xs font-semibold text-muted-foreground">
-                          ✅ Готово
+                        <span className="shrink-0 inline-flex items-center rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
+                          Готово
                         </span>
                       )}
                     </div>
                   </div>
 
                   {/* Content */}
-                  <div className="p-3 sm:p-4">
+                  <div className="p-4 sm:p-5">
                     {!animatorStatus ? (
-                      <p className="text-center text-muted-foreground text-sm py-4">
-                        —
+                      <p className="text-center text-muted-foreground text-sm py-8">
+                        Няма активна заявка за тази маса
                       </p>
                     ) : (
-                      <div className="space-y-3">
-                        <div>
-                          <p className="text-sm font-semibold mb-1">
-                            {animatorStatus.request.action}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {new Date(animatorStatus.request.timestamp).toLocaleTimeString('bg-BG', {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
-                          </p>
-                          {animatorStatus.assignedTo && (
-                            <p className="text-xs text-muted-foreground mt-1">
-                              Прието от: {animatorStatus.assignedTo}
+                      <div className="space-y-4">
+                        {/* Call-to-table: only when table requested animator after kid was already in zone */}
+                        {wasCalledToTable && (
+                          <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
+                            <p className="text-sm font-semibold text-amber-800 flex items-center gap-2">
+                              <span className="relative flex h-2 w-2">
+                                <span className="animate-ping absolute inline-flex h-2 w-2 rounded-full bg-amber-500 opacity-75" />
+                                <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500" />
+                              </span>
+                              Ви повикаха към масата — ви чакат
                             </p>
-                          )}
-                        </div>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="mt-3 w-full border-amber-600/50 text-amber-800 hover:bg-amber-500/10 font-semibold"
+                              onClick={() => handleReturnChildToTable(tableId, animatorStatus.request.id)}
+                              disabled={returningRequests.has(`${tableId}_${animatorStatus.request.id}`)}
+                            >
+                              {returningRequests.has(`${tableId}_${animatorStatus.request.id}`) ? (
+                                <>
+                                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                  Връщане...
+                                </>
+                              ) : (
+                                'Приеми'
+                              )}
+                            </Button>
+                          </div>
+                        )}
 
-                        {/* Timer Display - Only shows when child is in kids zone */}
+                        {/* Animator has accepted the call — child is being returned to table */}
+                        {isReturningToTable && (
+                          <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-3">
+                            <p className="text-sm font-semibold text-blue-800 flex items-center gap-2">
+                              <span className="h-2 w-2 rounded-full bg-blue-500" />
+                              Прието — върнете детето на масата
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Timer — compact dashboard style */}
                         {animatorStatus.timer && (
                           <div className={cn(
-                            "rounded-lg p-3 border",
-                            animatorStatus.timer.isRunning 
-                              ? "bg-yellow-500/10 border-yellow-500/30" 
-                              : "bg-muted/50 border-border/50"
+                            'rounded-xl p-4 border',
+                            animatorStatus.timer.isRunning
+                              ? 'bg-amber-500/5 border-amber-500/20'
+                              : 'bg-muted/30 border-border/50'
                           )}>
-                            <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center justify-between">
                               <div className="flex items-center gap-2">
                                 <Clock className={cn(
-                                  "h-4 w-4",
-                                  animatorStatus.timer.isRunning ? "text-yellow-600" : "text-muted-foreground"
+                                  'h-4 w-4',
+                                  animatorStatus.timer.isRunning ? 'text-amber-600' : 'text-muted-foreground'
                                 )} />
-                                <span className="text-xs font-semibold text-muted-foreground">
-                                  {animatorStatus.timer.isRunning ? 'Активен таймер' : 'Паузиран'}
+                                <span className="text-xs font-medium text-muted-foreground">
+                                  {animatorStatus.timer.isRunning ? 'Активен таймер' : 'Таймер на пауза'}
                                 </span>
                               </div>
                               <span className={cn(
-                                "font-mono text-xl font-bold",
-                                animatorStatus.timer.isRunning ? "text-yellow-600" : "text-muted-foreground"
+                                'font-mono text-lg font-semibold tabular-nums',
+                                animatorStatus.timer.isRunning ? 'text-amber-700' : 'text-muted-foreground'
                               )}>
                                 {String(animatorStatus.timer.hours).padStart(2, '0')}:
                                 {String(animatorStatus.timer.minutes).padStart(2, '0')}:
@@ -382,41 +578,18 @@ const KidsZoneDashboard: React.FC = () => {
                               </span>
                             </div>
                             {!animatorStatus.timer.isRunning && animatorStatus.timer.totalSeconds > 0 && (
-                              <div className="mt-2 pt-2 border-t border-border/50 text-xs text-muted-foreground">
-                                Таймерът е на пауза. Детето е на масата.
-                              </div>
+                              <p className="text-xs text-muted-foreground mt-2 pt-2 border-t border-border/50">
+                                Детето е на масата. Натиснете „Вземи обратно в къта“, когато да го върнете.
+                              </p>
                             )}
                           </div>
                         )}
-                        
-                        {/* Status Flow Indicator */}
-                        {hasConfirmedRequest && (
-                          <div className="bg-muted/30 rounded-lg p-3 border border-border/50 space-y-2">
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs font-semibold text-muted-foreground">Статус:</span>
-                              <div className="flex items-center gap-2">
-                                {isInKidsZone && (
-                                  <span className="text-xs font-semibold text-yellow-600 flex items-center gap-1.5">
-                                    <div className="h-2 w-2 rounded-full bg-yellow-600 animate-pulse" />
-                                    В детския кът
-                                  </span>
-                                )}
-                                {isReturningToTable && (
-                                  <span className="text-xs font-semibold text-blue-600 flex items-center gap-1.5">
-                                    <div className="h-2 w-2 rounded-full bg-blue-600" />
-                                    На масата
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                        
-                        {/* Action Buttons */}
+
+                        {/* Accept request — primary CTA when pending */}
                         {hasPendingRequest && (
                           <Button
                             size="lg"
-                            className="w-full h-12 btn-gold font-bold text-base shadow-lg hover:shadow-xl transition-all"
+                            className="w-full h-12 btn-gold font-semibold text-base"
                             onClick={() => handleCompleteAnimatorRequest(tableId, animatorStatus.request.id)}
                             disabled={completingRequests.has(`${tableId}_${animatorStatus.request.id}`)}
                           >
@@ -427,54 +600,51 @@ const KidsZoneDashboard: React.FC = () => {
                               </>
                             ) : (
                               <>
-                                <CheckCircle2 className="h-6 w-6 mr-2" />
-                                Приеми детето
+                                <CheckCircle2 className="h-5 w-5 mr-2" />
+                                Приеми поръчката
                               </>
                             )}
                           </Button>
                         )}
 
-                        {isInKidsZone && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="w-full h-10 border-blue-500 text-blue-600 hover:bg-blue-50 font-semibold"
-                            onClick={() => handleReturnChildToTable(tableId, animatorStatus.request.id)}
-                            disabled={returningRequests.has(`${tableId}_${animatorStatus.request.id}`)}
-                          >
-                            {returningRequests.has(`${tableId}_${animatorStatus.request.id}`) ? (
-                              <>
-                                <Loader2 className="h-5 w-5 mr-1.5 animate-spin" />
-                                Връщане...
-                              </>
-                            ) : (
-                              <>
-                                <Home className="h-5 w-5 mr-1.5" />
-                                Върни на масата
-                              </>
-                            )}
-                          </Button>
-                        )}
-
+                        {/* When child is returned to table: clear request or take back to zone */}
                         {isReturningToTable && (
-                          <Button
-                            size="sm"
-                            className="w-full h-10 btn-gold font-semibold"
-                            onClick={() => handleTakeChildBackToZone(tableId, animatorStatus.request.id)}
-                            disabled={takingBackRequests.has(`${tableId}_${animatorStatus.request.id}`)}
-                          >
-                            {takingBackRequests.has(`${tableId}_${animatorStatus.request.id}`) ? (
-                              <>
-                                <Loader2 className="h-5 w-5 mr-1.5 animate-spin" />
-                                Вземане...
-                              </>
-                            ) : (
-                              <>
-                                <Sparkles className="h-5 w-5 mr-1.5" />
-                                Вземи обратно в къта
-                              </>
-                            )}
-                          </Button>
+                          <>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="w-full h-10 font-semibold border-emerald-600/50 text-emerald-800 hover:bg-emerald-500/10"
+                              onClick={() => handleClearAnimatorRequestAfterReturn(tableId, animatorStatus.request.id)}
+                              disabled={clearingRequests.has(`${tableId}_${animatorStatus.request.id}`)}
+                            >
+                              {clearingRequests.has(`${tableId}_${animatorStatus.request.id}`) ? (
+                                <>
+                                  <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                                  Затваряне...
+                                </>
+                              ) : (
+                                'Детето е на масата — затвори заявката'
+                              )}
+                            </Button>
+                            <Button
+                              size="sm"
+                              className="w-full h-10 btn-gold font-semibold"
+                              onClick={() => handleTakeChildBackToZone(tableId, animatorStatus.request.id)}
+                              disabled={takingBackRequests.has(`${tableId}_${animatorStatus.request.id}`)}
+                            >
+                              {takingBackRequests.has(`${tableId}_${animatorStatus.request.id}`) ? (
+                                <>
+                                  <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                                  Вземане...
+                                </>
+                              ) : (
+                                <>
+                                  <Sparkles className="h-5 w-5 mr-2" />
+                                  Вземи обратно в къта
+                                </>
+                              )}
+                            </Button>
+                          </>
                         )}
                       </div>
                     )}

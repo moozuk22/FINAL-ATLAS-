@@ -181,7 +181,7 @@ const DailyMenuEditor: React.FC<DailyMenuEditorProps> = ({ open, onClose }) => {
                     className="flex items-center justify-between p-2 border rounded hover:bg-secondary/50"
                   >
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{item.name}</p>
+                      <p className="text-sm font-medium break-words">{item.name}</p>
                       <p className="text-xs text-muted-foreground">{item.price.toFixed(2)} EUR</p>
                     </div>
                     <Button
@@ -225,7 +225,7 @@ const DailyMenuEditor: React.FC<DailyMenuEditorProps> = ({ open, onClose }) => {
                         />
                       ) : (
                         <>
-                          <p className="text-sm font-medium truncate">{item.name}</p>
+                          <p className="text-sm font-medium break-words">{item.name}</p>
                           <p className="text-xs text-muted-foreground">{item.price.toFixed(2)} EUR</p>
                         </>
                       )}

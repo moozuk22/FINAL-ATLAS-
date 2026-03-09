@@ -56,10 +56,10 @@ const CartSummary: React.FC<CartSummaryProps> = ({
         <ShoppingBag className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-primary" />
         </div>
       <div className="min-w-0">
-        <p className="text-xs text-muted-foreground truncate">
+        <p className="text-xs text-muted-foreground break-words">
           {itemCount} {itemCount === 1 ? 'артикул' : 'артикула'}
           </p>
-        <p className="font-semibold text-foreground text-sm sm:text-base truncate">
+        <p className="font-semibold text-foreground text-sm sm:text-base break-words">
             {total.toFixed(2)} EUR
           </p>
         </div>

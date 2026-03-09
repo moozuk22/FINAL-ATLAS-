@@ -25,15 +25,15 @@ const RequestRow: React.FC<RequestRowProps> = ({
     minute: '2-digit',
   });
 
-  // Shorten action text (without emoji, as it's already shown from requestType)
-  const getShortAction = (action: string) => {
-    if (action.includes('АНИМАТОР') || action.includes('Аниматор')) return 'Аниматор';
-    if (action.includes('BILL') || action.includes('Сметка')) return 'Сметка';
-    if (action.includes('Сервитьор') || action.includes('WAITER')) return 'Сервитьор';
-    if (action.includes('Поръчка') || action.includes('ORDER')) return 'Поръчка';
-    if (action.includes('Детски')) return 'Детски';
-    return action.length > 20 ? action.substring(0, 20) + '...' : action;
-  };
+  // Action text: show full text (no shortening) so it's visible on all devices
+  const displayAction = (() => {
+    if (request.action.includes('АНИМАТОР') || request.action.includes('Аниматор')) return 'Аниматор';
+    if (request.action.includes('BILL') || request.action.includes('Сметка')) return 'Сметка';
+    if (request.action.includes('Сервитьор') || request.action.includes('WAITER')) return 'Сервитьор';
+    if (request.action.includes('Поръчка') || request.action.includes('ORDER')) return 'Поръчка';
+    if (request.action.includes('Детски')) return 'Детски';
+    return request.action;
+  })();
 
   const handleConfirm = () => {
     setLocalConfirmed(true);
@@ -63,8 +63,8 @@ const RequestRow: React.FC<RequestRowProps> = ({
                 {request.requestType === 'kids_zone' && '🎭'}
               </span>
             )}
-            <span className="font-bold text-sm sm:text-base truncate">
-              {getShortAction(request.action)}
+            <span className="font-bold text-sm sm:text-base break-words min-w-0">
+              {displayAction}
             </span>
             <span className="text-xs text-muted-foreground flex items-center gap-0.5 flex-shrink-0">
               <Clock className="h-3 w-3" />
@@ -74,13 +74,8 @@ const RequestRow: React.FC<RequestRowProps> = ({
           
           {/* Details - only if exists and not redundant */}
           {request.details && request.details !== request.action && !request.details.includes('Заявка за') && (
-            <div className="text-xs sm:text-sm text-foreground/70 mt-1 line-clamp-2">
-              {(() => {
-                const cleanedDetails = stripAllergenNumbersFromName(request.details);
-                return cleanedDetails.length > 40 
-                  ? cleanedDetails.substring(0, 40) + '...' 
-                  : cleanedDetails;
-              })()}
+            <div className="text-xs sm:text-sm text-foreground/70 mt-1 break-words">
+              {stripAllergenNumbersFromName(request.details)}
             </div>
           )}
           

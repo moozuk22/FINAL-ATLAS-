@@ -71,7 +71,7 @@ const TableCard: React.FC<TableCardProps> = ({
       {/* Header */}
       <div className="p-3 sm:p-4 border-b border-border flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
-          <h3 className="font-display text-base sm:text-lg font-semibold truncate">
+          <h3 className="font-display text-base sm:text-lg font-semibold break-words min-w-0">
             {session.tableId.replace('_', ' ')}
           </h3>
           <StatusBadge status={status} className="flex-shrink-0" />
@@ -137,7 +137,7 @@ const TableCard: React.FC<TableCardProps> = ({
         <div className="p-3 sm:p-4 border-t border-border bg-secondary/20">
           <div className="flex items-center justify-between gap-2">
             <span className="text-xs sm:text-sm font-semibold text-muted-foreground">Общо</span>
-            <span className="font-display text-lg sm:text-xl font-bold text-primary truncate">
+            <span className="font-display text-lg sm:text-xl font-bold text-primary break-words">
               {totalBill.toFixed(2)} EUR
             </span>
           </div>
