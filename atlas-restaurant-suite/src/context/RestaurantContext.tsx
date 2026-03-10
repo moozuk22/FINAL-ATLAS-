@@ -192,6 +192,8 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   
   // Ref to store the latest loadTableSessions function for subscriptions
   const loadTableSessionsRef = useRef<() => Promise<void>>();
+  // Ref to avoid running ensureDailyMenuForToday more than once per app load
+  const hasEnsuredDailyMenuRef = useRef(false);
   // Ref to store current tables for change detection (avoids dependency issues)
   const tablesRef = useRef<Record<string, TableSession>>(tables);
   // Ref to store instant new order callback (0ms detection)
@@ -3690,6 +3692,45 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       throw error;
     }
   }, [broadcastUpdate]);
+
+  // Ensure today has a daily menu: if empty, copy from yesterday (runs once per app load)
+  const ensureDailyMenuForToday = useCallback(async () => {
+    if (hasEnsuredDailyMenuRef.current) return;
+    hasEnsuredDailyMenuRef.current = true;
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const { data: todayRows, error: todayErr } = await supabase
+        .from('daily_menu_assignments')
+        .select('id')
+        .eq('date', today)
+        .limit(1);
+      if (todayErr) return;
+      if (todayRows && todayRows.length > 0) return; // today already has menu
+
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayStr = yesterday.toISOString().split('T')[0];
+      const { data: yesterdayRows, error: yesterdayErr } = await supabase
+        .from('daily_menu_assignments')
+        .select('menu_item_id')
+        .eq('date', yesterdayStr)
+        .eq('is_visible', true)
+        .order('created_at', { ascending: true });
+      if (yesterdayErr || !yesterdayRows || yesterdayRows.length === 0) return;
+
+      const itemIds = yesterdayRows.map((r: { menu_item_id: string }) => r.menu_item_id);
+      await setDailyMenuItems(today, itemIds);
+      console.log(`📅 Daily menu for ${today} auto-filled from ${yesterdayStr} (${itemIds.length} items)`);
+    } catch (e) {
+      console.error('Error ensuring daily menu for today:', e);
+      hasEnsuredDailyMenuRef.current = false; // allow retry on next load
+    }
+  }, [setDailyMenuItems]);
+
+  // Run once on app load: if today has no daily menu, copy from yesterday (menu 11:00–15:00)
+  useEffect(() => {
+    ensureDailyMenuForToday();
+  }, [ensureDailyMenuForToday]);
 
   // Category order functions
   const getCategoryOrder = useCallback(async (): Promise<string[]> => {
