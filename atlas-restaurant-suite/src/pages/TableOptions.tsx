@@ -121,17 +121,23 @@ const TableOptions: React.FC = () => {
               </div>
             </Button>
           ) : (
-            <div className="w-full card-premium rounded-xl p-6 border border-border/50 opacity-60">
-              <div className="flex items-center gap-4">
-                <div className="h-12 w-12 rounded-full bg-muted/40 flex items-center justify-center">
-                  <Utensils className="h-6 w-6 text-muted-foreground" />
+            <Button
+              onClick={() => navigate(`/menu?table=${tableId}`)}
+              className="w-full card-premium rounded-xl p-6 border border-border/50 opacity-80 hover:opacity-100 hover:border-primary/50 transition-all group h-auto"
+              variant="ghost"
+            >
+              <div className="flex items-center justify-between w-full">
+                <div className="flex items-center gap-4">
+                  <div className="h-12 w-12 rounded-full bg-muted/40 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
+                    <Utensils className="h-6 w-6 text-muted-foreground group-hover:text-primary transition-colors" />
+                  </div>
+                  <div className="text-left">
+                    <h3 className="font-display text-lg font-semibold">🍽️ Меню</h3>
+                  </div>
                 </div>
-                <div className="text-left">
-                  <h3 className="font-display text-lg font-semibold">🍽️ Меню</h3>
-                  <p className="text-sm text-muted-foreground">Няма меню за деня</p>
-                </div>
+                <ArrowRight className="h-5 w-5 text-muted-foreground group-hover:text-primary transition-colors" />
               </div>
-            </div>
+            </Button>
           )}
 
         </div>

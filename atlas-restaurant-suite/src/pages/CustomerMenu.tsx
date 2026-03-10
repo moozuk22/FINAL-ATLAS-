@@ -121,8 +121,15 @@ const CustomerMenu: React.FC = () => {
   const [categoryOrder, setCategoryOrder] = useState<string[]>([]);
   const [itemOrders, setItemOrders] = useState<Record<string, string[]>>({});
   
-  // Check if menu should be hidden (after 15:00) - DISABLED FOR NOW
-  const isMenuHidden = false; // Toggle back: useMemo(() => { const hour = new Date().getHours(); return hour >= 15; }, []);
+  // Menu visible only 11:00–15:00; outside that window only waiter/animator/bill buttons
+  const isMenuHidden = useMemo(() => {
+    const now = new Date(currentTime);
+    const hours = now.getHours();
+    const minutes = now.getMinutes();
+    const totalMinutes = hours * 60 + minutes;
+    // 11:00 = 660, 15:00 = 900 → visible only in [660, 900)
+    return totalMinutes < 11 * 60 || totalMinutes >= 15 * 60;
+  }, [currentTime]);
 
   // Update current time every second for timer display
   useEffect(() => {
@@ -950,7 +957,7 @@ const CustomerMenu: React.FC = () => {
               </div>
               
               {/* Cart Badge - Opens full Cart Drawer */}
-              {!session.isLocked && (
+              {!session.isLocked && !isMenuHidden && (
                 <div>
                 <div 
                   className="flex items-center gap-1.5 sm:gap-2 p-2 sm:p-2.5 md:p-3 bg-gradient-to-br from-card/80 to-card/60 border border-border/40 rounded-xl transition-all touch-manipulation flex-shrink-0 min-w-[120px] sm:min-w-[140px] md:min-w-[160px] shadow-md cursor-pointer hover:from-card hover:to-primary/5 hover:border-primary/50"
@@ -987,10 +994,10 @@ const CustomerMenu: React.FC = () => {
                 <Lock className="h-8 w-8 sm:h-10 sm:w-10 text-muted-foreground/50" />
               </div>
               <p className="text-lg sm:text-xl font-medium text-foreground mb-2">
-                Менюто е недостъпно след 15:00
+                Менюто е достъпно от 11:00 до 15:00
               </p>
               <p className="text-sm sm:text-base text-muted-foreground">
-                Моля, използвайте другите опции
+                Използвайте бутоните по-долу за сервитьор, аниматор или сметка.
               </p>
             </div>
           ) : dailyMenuLoading ? (
