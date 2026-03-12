@@ -3912,17 +3912,37 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   // Revenue report function
   const getRevenueReport = useCallback(async (date: string): Promise<RevenueReport> => {
     try {
-      const { data, error } = await supabase
-        .from('completed_orders')
-        .select('total, action')
-        .gte('created_at', `${date}T00:00:00`)
-        .lte('created_at', `${date}T23:59:59`)
-        .eq('action', '🍽️ NEW ORDER');
+      const from = `${date}T00:00:00`;
+      const to = `${date}T23:59:59`;
 
-      if (error) throw error;
+      // Include both active (table_requests) and archived (completed_orders) orders
+      const [
+        { data: activeData, error: activeError },
+        { data: completedData, error: completedError },
+      ] = await Promise.all([
+        supabase
+          .from('table_requests')
+          .select('total, action')
+          .gte('created_at', from)
+          .lte('created_at', to)
+          .eq('action', '🍽️ NEW ORDER'),
+        supabase
+          .from('completed_orders')
+          .select('total, action')
+          .gte('created_at', from)
+          .lte('created_at', to)
+          .eq('action', '🍽️ NEW ORDER'),
+      ]);
 
-      const total = (data || []).reduce((sum, order) => sum + parseFloat(String(order.total || '0')), 0);
-      const orderCount = (data || []).length;
+      if (activeError) throw activeError;
+      if (completedError) throw completedError;
+
+      const allOrders = [...(activeData || []), ...(completedData || [])];
+      const total = allOrders.reduce(
+        (sum, order) => sum + parseFloat(String(order.total || '0')),
+        0
+      );
+      const orderCount = allOrders.length;
 
       return {
         total,
