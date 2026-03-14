@@ -582,6 +582,26 @@ const KidsZoneDashboard: React.FC = () => {
                           </div>
                         )}
 
+                        {/* Close request without returning child — when kid is in zone */}
+                        {hasConfirmedRequest && isInKidsZone && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="w-full h-10 font-semibold border-muted-foreground/30 text-muted-foreground hover:bg-destructive/10 hover:border-destructive/50 hover:text-destructive"
+                            onClick={() => handleClearAnimatorRequestAfterReturn(tableId, animatorStatus.request.id)}
+                            disabled={clearingRequests.has(`${tableId}_${animatorStatus.request.id}`)}
+                          >
+                            {clearingRequests.has(`${tableId}_${animatorStatus.request.id}`) ? (
+                              <>
+                                <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                                Затваряне...
+                              </>
+                            ) : (
+                              'Затвори заявката (без да връщате детето на масата)'
+                            )}
+                          </Button>
+                        )}
+
                         {/* Accept request — primary CTA when pending */}
                         {hasPendingRequest && (
                           <Button
