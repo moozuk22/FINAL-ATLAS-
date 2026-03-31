@@ -989,7 +989,7 @@ const CustomerMenu: React.FC = () => {
           cartDrawerOpen && "pr-0 sm:pr-[400px] md:pr-[450px]"
         )}>
           {isMenuHidden ? (
-            <div className="text-center py-16 sm:py-20">
+            <div className="hidden">
               <div className="inline-flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-muted/20 mb-4">
                 <Lock className="h-8 w-8 sm:h-10 sm:w-10 text-muted-foreground/50" />
               </div>
@@ -1074,10 +1074,11 @@ const CustomerMenu: React.FC = () => {
       >
         <div className="max-w-3xl mx-auto space-y-2 sm:space-y-2.5">
           {/* Submit Order Button */}
-          <Button
+          {!isMenuHidden && (
+            <Button
             className="w-full btn-gold h-11 sm:h-12 md:h-14 text-xs sm:text-sm font-semibold tracking-wide uppercase shadow-lg hover:shadow-2xl transition-all touch-manipulation rounded-xl"
             onClick={handleSubmitOrder}
-            disabled={pendingItems.length === 0 || isSubmitting || isMenuHidden}
+            disabled={pendingItems.length === 0 || isSubmitting}
           >
             {isSubmitting ? (
               <>
@@ -1090,7 +1091,8 @@ const CustomerMenu: React.FC = () => {
                 Изпрати поръчка
               </>
             )}
-          </Button>
+            </Button>
+          )}
           
           {/* Secondary Actions - Luxury Design */}
           <div className="grid grid-cols-3 gap-1.5 sm:gap-2 md:gap-3">
