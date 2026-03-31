@@ -989,7 +989,7 @@ const CustomerMenu: React.FC = () => {
           cartDrawerOpen && "pr-0 sm:pr-[400px] md:pr-[450px]"
         )}>
           {isMenuHidden ? (
-            <div className="text-center py-16 sm:py-20">
+            <div className="hidden">
               <div className="inline-flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-muted/20 mb-4">
                 <Lock className="h-8 w-8 sm:h-10 sm:w-10 text-muted-foreground/50" />
               </div>
