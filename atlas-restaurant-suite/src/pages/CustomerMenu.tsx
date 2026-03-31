@@ -1074,10 +1074,11 @@ const CustomerMenu: React.FC = () => {
       >
         <div className="max-w-3xl mx-auto space-y-2 sm:space-y-2.5">
           {/* Submit Order Button */}
-          <Button
+          {!isMenuHidden && (
+            <Button
             className="w-full btn-gold h-11 sm:h-12 md:h-14 text-xs sm:text-sm font-semibold tracking-wide uppercase shadow-lg hover:shadow-2xl transition-all touch-manipulation rounded-xl"
             onClick={handleSubmitOrder}
-            disabled={pendingItems.length === 0 || isSubmitting || isMenuHidden}
+            disabled={pendingItems.length === 0 || isSubmitting}
           >
             {isSubmitting ? (
               <>
@@ -1090,7 +1091,8 @@ const CustomerMenu: React.FC = () => {
                 Изпрати поръчка
               </>
             )}
-          </Button>
+            </Button>
+          )}
           
           {/* Secondary Actions - Luxury Design */}
           <div className="grid grid-cols-3 gap-1.5 sm:gap-2 md:gap-3">
